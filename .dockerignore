@@ -1,0 +1,28 @@
+# Node
+aia/webapp/ui/node_modules/
+**/node_modules/
+
+# Build output
+ia/webapp/static/ui/
+**/dist/
+**/build/
+
+# Python caches
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+
+# Local config / archives
+config.json
+archive/
+
+# VCS/IDE
+.git/
+.vscode/
+.idea/
+
+# Logs
+/tmp/ia_webapp.log
+nohup.out

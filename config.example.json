@@ -1,0 +1,9 @@
+{
+    "SOURCE_URL": "http://10.42.39.161/results/",
+    "ARCHIVE_ROOT": "./archive",
+    "DAYS": 3,
+    "OPENAI_API_KEY": "sk-your-key",
+    "OPENAI_API_BASE": "https://api.moonshot.cn/v1",
+    "OPENAI_MODEL": "kimi-k2-0711-preview",
+    "OPENAI_VERIFY_SSL": true
+}

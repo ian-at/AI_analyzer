@@ -1,0 +1,295 @@
+from __future__ import annotations
+
+import json
+import os
+from collections import Counter
+from typing import Any
+
+from ..analyzer.anomaly import heuristic_anomalies, load_history_for_keys, compute_entry_features
+from ..analyzer.k2_client import K2Client
+from ..analyzer.model_provider import K2ProviderAdapter
+from ..fetcher.crawler import crawl_incremental
+from ..parser.html_parser import parse_ub_html
+from ..parser.unixbench_parser import parse_unixbench_pre_text
+from ..reporting.report import generate_report
+from ..utils.io import read_json, read_jsonl, write_json, write_jsonl
+import glob
+import time
+from datetime import datetime, timedelta
+
+
+def parse_run(run_dir: str) -> list[dict[str, Any]]:
+    meta = read_json(os.path.join(run_dir, "meta.json"))
+    html_path = os.path.join(run_dir, "raw_html", meta["files"]["html"])
+    with open(html_path, "r", encoding="utf-8", errors="ignore") as f:
+        html_text = f.read()
+    # 优先尝试 UnixBench <pre> 文本解析
+    records = parse_unixbench_pre_text(html_text)
+    if not records:
+        # 回退到表格解析
+        records = parse_ub_html(html_text)
+    write_jsonl(os.path.join(run_dir, "ub.jsonl"), records)
+    return records
+
+
+def summarize(anomalies: list[dict[str, Any]]) -> dict:
+    counts = Counter(a.get("severity", "") for a in anomalies)
+    return {
+        "total_anomalies": len(anomalies),
+        "severity_counts": {
+            "high": counts.get("high", 0),
+            "medium": counts.get("medium", 0),
+            "low": counts.get("low", 0),
+        },
+    }
+
+
+def _normalize_confidence(conf: Any) -> float | None:
+    try:
+        if isinstance(conf, (int, float)):
+            return float(conf) / 100.0 if float(conf) > 1.0 else float(conf)
+        if isinstance(conf, str):
+            s = conf.strip().lower()
+            if s in ("high", "high-confidence"):
+                return 0.9
+            if s in ("medium", "mid", "moderate"):
+                return 0.7
+            if s in ("low",):
+                return 0.5
+            v = float(s)
+            return v / 100.0 if v > 1.0 else v
+    except Exception:
+        return None
+    return None
+
+
+def _normalize_k2_anomalies(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for a in items:
+        current_value = a.get("current_value")
+        if current_value is None and a.get("value") is not None:
+            current_value = a.get("value")
+        # 兜底：若K2未回填当前值，从deltas/或features中尝试恢复
+        if current_value is None:
+            dv = a.get("deltas") or {}
+            if isinstance(dv, dict) and "current_value" in dv:
+                current_value = dv.get("current_value")
+        primary_reason = a.get("primary_reason") or a.get(
+            "justification") or a.get("description") or ""
+        confidence = _normalize_confidence(a.get("confidence"))
+        normalized.append({
+            "suite": a.get("suite"),
+            "case": a.get("case"),
+            "metric": a.get("metric"),
+            "current_value": current_value,
+            "unit": a.get("unit"),
+            "severity": a.get("severity"),
+            "confidence": confidence,
+            "primary_reason": primary_reason,
+            "deltas": a.get("deltas") or {},
+            "root_causes": a.get("root_causes") or ([{"cause": a.get("root_cause"), "likelihood": None}] if a.get("root_cause") else []),
+            "supporting_evidence": a.get("supporting_evidence") or {},
+            "suggested_next_checks": a.get("suggested_next_checks") or [],
+        })
+    return normalized
+
+
+def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_existing: bool = True) -> tuple[list[dict[str, Any]], dict]:
+    meta = read_json(os.path.join(run_dir, "meta.json"))
+    entries = read_jsonl(os.path.join(run_dir, "ub.jsonl"))
+
+    # 构建 (suite, case, metric) 粒度的历史数据
+    keys = [(e.get("suite", ""), e.get("case", ""), e.get("metric", ""))
+            for e in entries]
+    history = load_history_for_keys(archive_root, keys, max_runs=20)
+
+    anomalies: list[dict[str, Any]] = []
+    # 若已有 K2 结果且非空，直接复用，避免重复调用
+    existing = read_jsonl(os.path.join(run_dir, "anomalies.k2.jsonl"))
+    if reuse_existing and existing:
+        # 复用已有结果，但仍更新 summary.json 与 report.html，且回填引擎信息
+        summ = summarize(existing)
+        # 若存在 K2 结果文件，默认标记为 kimi-k2 引擎（无法确定版本时用 n/a）
+        summ["analysis_engine"] = {
+            "name": "kimi-k2",
+            "version": "n/a",
+            "degraded": False,
+        }
+        # 回填分析时间（UTC）
+        summ["analysis_time"] = datetime.utcnow().isoformat() + "Z"
+        write_json(os.path.join(run_dir, "summary.json"), summ)
+        generate_report(run_dir, meta, existing, summ)
+        return existing, summ
+    provider = K2ProviderAdapter(k2) if k2 else None
+    if provider and provider.enabled():
+        # 按 suite 分组以控制单次请求载荷大小
+        from collections import defaultdict
+        groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for e in entries:
+            g = e.get("suite") or "__default__"
+            groups[g].append(e)
+        for gid, ents in groups.items():
+            # 准备该分组内每个条目的历史数组映射（key 以 :: 连接）
+            hist_map: dict[str, list[float]] = {}
+            for e in ents:
+                k = (e.get("suite", ""), e.get("case", ""), e.get("metric", ""))
+                hist_map["::".join(k)] = history.get(k, [])
+            # 附加统计特征，帮助模型给出更具体的根因解释
+            features = compute_entry_features(ents, history)
+            # 降低并发：组与组之间小睡，降低触发限频的概率
+            import time
+            time.sleep(2.0)
+            result = provider.analyze(
+                run_id=os.path.basename(run_dir),
+                group_id=str(gid),
+                entries=[{**e, "features": features.get("::".join(
+                    [e.get("suite", ""), e.get("case", ""), e.get("metric", "")]))} for e in ents],
+                history=hist_map,
+            )
+            anomalies.extend(_normalize_k2_anomalies(
+                result.get("anomalies", [])))
+    else:
+        anomalies = heuristic_anomalies(entries, history)
+
+    # 保存异常结果与汇总
+    write_jsonl(os.path.join(run_dir, "anomalies.k2.jsonl"), anomalies)
+    summ = summarize(anomalies)
+    # 写入分析引擎元数据，便于前端展示/筛选
+    enabled = bool(provider and provider.enabled())
+    summ["analysis_engine"] = {
+        "name": (provider.name() if enabled else "heuristic"),
+        "version": (provider.version() if enabled else "n/a"),
+        "degraded": (not enabled),
+    }
+    # 写入分析时间（UTC）
+    summ["analysis_time"] = datetime.utcnow().isoformat() + "Z"
+    write_json(os.path.join(run_dir, "summary.json"), summ)
+    # 生成静态报告页面
+    generate_report(run_dir, meta, anomalies, summ)
+    return anomalies, summ
+
+
+def run_pipeline(source_url: str, archive_root: str, days: int, k2: K2Client | None) -> list[str]:
+    new_runs = crawl_incremental(source_url, archive_root, days)
+    processed: list[str] = []
+    for run_dir in new_runs:
+        records = parse_run(run_dir)
+        _anoms, _summ = analyze_run(run_dir, k2, archive_root)
+        processed.append(run_dir)
+        # 降低K2限频概率：run 与 run 之间增加间隔
+        time.sleep(3.0)
+    return processed
+
+
+def _pick_recent_runs_from_index(archive_root: str, limit: int) -> list[str]:
+    index_path = os.path.join(archive_root, "runs_index.jsonl")
+    rows = read_jsonl(index_path)
+    if not rows:
+        return []
+    # 追加式索引，取末尾的最近 N 条（保持时间顺序从新到旧）
+    selected = [row.get("run_dir") for row in rows if row.get("run_dir")]
+    selected = [p for p in selected if isinstance(p, str)]
+    unique: list[str] = []
+    for p in selected:
+        if p not in unique:
+            unique.append(p)
+    # unique 为追加顺序（旧->新）。取最近 N 个（尾部切片）。
+    tail = unique[-limit:]
+    return tail
+
+
+def _pick_recent_runs_by_scan(archive_root: str, limit: int) -> list[str]:
+    pattern = os.path.join(archive_root, "*", "run_*")
+    paths = glob.glob(pattern)
+    paths.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    return paths[:limit]
+
+
+def reanalyze_recent_runs(archive_root: str, limit: int, k2: K2Client | None, force: bool = False) -> list[str]:
+    """对最近 N 个已有 run 进行复分析（不重新抓取）。
+    优先依据 runs_index.jsonl 选取，若不存在则扫描目录按修改时间排序。
+    若缺少 ub.jsonl，将先执行解析。
+    """
+    candidates = _pick_recent_runs_from_index(archive_root, limit)
+    if not candidates:
+        candidates = _pick_recent_runs_by_scan(archive_root, limit)
+    processed: list[str] = []
+    for run_dir in candidates:
+        ub_path = os.path.join(run_dir, "ub.jsonl")
+        need_parse = (not os.path.exists(ub_path)) or (
+            os.path.exists(ub_path) and os.path.getsize(ub_path) == 0)
+        if need_parse:
+            parse_run(run_dir)
+        analyze_run(run_dir, k2, archive_root, reuse_existing=not force)
+        processed.append(run_dir)
+    return processed
+
+
+def reanalyze_missing(archive_root: str, k2: K2Client | None, max_runs: int | None = None, days: int | None = None) -> list[str]:
+    """仅对缺少 K2 结果的 run 进行复分析。
+
+    - 若 `anomalies.k2.jsonl` 不存在或文件大小为 0，则认为“未分析”。
+    - 若 `ub.jsonl` 不存在或为空，将先执行解析。
+    - 处理顺序按目录最近修改时间（新→旧）。
+    - 每个 run 之间 sleep 以降低限频。
+    """
+    pattern = os.path.join(archive_root, "*", "run_*")
+    paths = glob.glob(pattern)
+    # 可选：仅筛选最近 N 天
+    if days is not None and days > 0:
+        cutoff = (datetime.utcnow() - timedelta(days=days-1)
+                  ).strftime("%Y-%m-%d")
+        filtered: list[str] = []
+        for p in paths:
+            date_dir = os.path.basename(os.path.dirname(p))
+            if date_dir >= cutoff:
+                filtered.append(p)
+        paths = filtered
+    paths.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    processed: list[str] = []
+    for run_dir in paths:
+        k2_path = os.path.join(run_dir, "anomalies.k2.jsonl")
+        need_analyze = (not os.path.exists(k2_path)) or (
+            os.path.exists(k2_path) and os.path.getsize(k2_path) == 0)
+        if not need_analyze:
+            continue
+        ub_path = os.path.join(run_dir, "ub.jsonl")
+        need_parse = (not os.path.exists(ub_path)) or (
+            os.path.exists(ub_path) and os.path.getsize(ub_path) == 0)
+        if need_parse:
+            parse_run(run_dir)
+        analyze_run(run_dir, k2, archive_root, reuse_existing=True)
+        processed.append(run_dir)
+        # 降低限频
+        time.sleep(3.0)
+        if max_runs is not None and len(processed) >= max_runs:
+            break
+    return processed
+
+
+def reanalyze_runs_by_criteria(archive_root: str, runs: list, k2=None, force=False):
+    """根据给定的runs列表进行重新分析"""
+    processed = []
+    for run_data in runs:
+        rel = run_data.get("rel", "")
+        if not rel:
+            continue
+        run_dir = os.path.join(archive_root, rel)
+        if not os.path.isdir(run_dir):
+            continue
+
+        # 检查是否需要解析
+        ub_path = os.path.join(run_dir, "ub.jsonl")
+        need_parse = (not os.path.exists(ub_path)) or (
+            os.path.exists(ub_path) and os.path.getsize(ub_path) == 0)
+        if need_parse:
+            parse_run(run_dir)
+
+        # 执行分析 (force=True 强制重新分析)
+        analyze_run(run_dir, k2, archive_root, reuse_existing=(not force))
+        processed.append(rel)
+
+        # 降低限频
+        time.sleep(1.0)
+
+    return processed

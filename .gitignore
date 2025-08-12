@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.mypy_cache/
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Node / Frontend
+ia/webapp/ui/node_modules/
+
+# Vite build output (served by FastAPI,不入库)
+ia/webapp/static/ui/
+
+# IDE/Editor
+.vscode/
+.idea/
+
+# Local settings
+*.local
+*.secret
+.secrets*/
+config.json
+.cursor/
+
+# Archive artifacts to keep repo small (报告与索引)
+#archive/.analysis_status
+#archive/runs_index.jsonl
+#archive/*/index.jsonl
+#archive/*/run_*/report.html
+#archive/*/run_*/anomalies.k2.jsonl
+#archive/*/run_*/ub.jsonl
+#archive/*/run_*/summary.json
+#archive/*/run_*/meta.json
+#archive/*/run_*/raw_html/
+archive/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime
+/tmp/ia_webapp.log
+nohup.out
+
+# Coverage / build
+htmlcov/
+coverage.xml
+build/
+dist/
+
