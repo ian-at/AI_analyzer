@@ -118,9 +118,11 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                     }
 
                     const jobStatus = await jr.json()
+                    const total = jobStatus.total || jobStatus.result?.total || analysisProgress.total || 0
+                    const current = jobStatus.current || 0
 
                     if (jobStatus.status === 'completed') {
-                        setAnalysisProgress({ visible: false, current: 100 })
+                        setAnalysisProgress({ visible: false, current: 100, total })
                         const processed = jobStatus.result?.processed || 0
                         message.success(`分析完成！处理了 ${processed} 个运行`)
                         // 刷新所有数据
@@ -136,8 +138,9 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                         message.error('分析失败：' + errorMsg)
                         setCurrentJobId(null)
                     } else if (jobStatus.status === 'running') {
-                        // 显示运行中状态
-                        setAnalysisProgress({ visible: true, current: 50, status: '正在分析中，请稍候...' })
+                        // 显示运行中状态（基于 current/total 真实进度）
+                        const percent = total > 0 ? Math.min(99, Math.floor((current / total) * 100)) : 50
+                        setAnalysisProgress({ visible: true, current: percent, total, status: jobStatus.message || '正在分析中，请稍候...' })
                         setTimeout(checkProgress, 2000)
                     } else {
                         // pending 状态
@@ -474,6 +477,11 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <span>分析进度:</span>
                             <Progress percent={analysisProgress.current} style={{ flex: 1 }} />
+                            {analysisProgress.total != null && (
+                                <span style={{ minWidth: 120, textAlign: 'right', color: '#666' }}>
+                                    {Math.min(analysisProgress.current, 99)}% ({Math.min(analysisProgress.total || 0, Math.max(analysisProgress.current, 0))}/{analysisProgress.total})
+                                </span>
+                            )}
                             {currentJobId && <Button size="small" danger onClick={() => {
                                 setAnalysisProgress({ visible: false, current: 0 })
                                 setCurrentJobId(null)
@@ -503,6 +511,60 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                         recentLimit: 10
                     }}
                 >
+                    <Form.Item>
+                        <Space>
+                            <Button
+                                type="primary"
+                                onClick={async () => {
+                                    try {
+                                        const engine = analysisForm.getFieldValue('engine') || 'auto'
+                                        const r = await fetch(`/api/v1/actions/reanalyze-all-missing?engine=${encodeURIComponent(engine)}`, { method: 'POST' })
+                                        const js: JobResp = await r.json()
+                                        if (!r.ok) {
+                                            message.error((js as any)?.error || '启动分析所有失败')
+                                            return
+                                        }
+                                        setShowAnalysisModal(false)
+                                        setCurrentJobId(js.job_id)
+                                        setAnalysisProgress({ visible: true, current: 0, status: '正在分析所有未分析的运行...' })
+                                        // 复用同一进度轮询
+                                        const check = async () => {
+                                            try {
+                                                const jr = await fetch(`/api/v1/jobs/${js.job_id}`)
+                                                if (jr.ok) {
+                                                    const s = await jr.json()
+                                                    const total = s.total || s.result?.total || 0
+                                                    const current = s.current || 0
+                                                    if (s.status === 'completed') {
+                                                        setAnalysisProgress({ visible: false, current: 100, total })
+                                                        const processed = s.result?.processed?.length || s.result?.processed || 0
+                                                        message.success(`分析完成，处理 ${processed}/${total}`)
+                                                        runs.refetch(); summary.refetch(); top.refetch(); tl.refetch(); analysisStatus.refetch()
+                                                        setCurrentJobId(null)
+                                                    } else if (s.status === 'failed') {
+                                                        setAnalysisProgress({ visible: false, current: 0 })
+                                                        message.error('分析失败：' + (s.error || '未知错误'))
+                                                        setCurrentJobId(null)
+                                                    } else {
+                                                        const percent = total > 0 ? Math.min(99, Math.floor((current / total) * 100)) : 50
+                                                        setAnalysisProgress({ visible: true, current: percent, total, status: s.message || '运行中...' })
+                                                        setTimeout(check, 2000)
+                                                    }
+                                                }
+                                            } catch (e) {
+                                                setTimeout(check, 4000)
+                                            }
+                                        }
+                                        setTimeout(check, 1500)
+                                    } catch (e) {
+                                        message.error('启动分析所有失败：' + String(e))
+                                    }
+                                }}
+                            >
+                                分析所有（仅未分析）
+                            </Button>
+                        </Space>
+                    </Form.Item>
                     <Form.Item name="mode" label="分析模式">
                         <Select>
                             <Select.Option value="recent">最近N个运行</Select.Option>

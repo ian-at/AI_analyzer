@@ -79,6 +79,27 @@ def _start_job(fn, *args, **kwargs) -> str:
     return job_id
 
 
+def _start_job_with_id(fn_with_job_id, *args, **kwargs) -> str:
+    """启动一个可在执行过程中按 job_id 更新进度的任务。
+    fn_with_job_id 接收第一个参数为 job_id。
+    """
+    job_id = uuid.uuid4().hex[:12]
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "running", "current": 0}
+
+    def _run():
+        try:
+            res = fn_with_job_id(job_id, *args, **kwargs)
+            with _jobs_lock:
+                _jobs[job_id] = {"status": "completed", "result": res}
+        except Exception as e:
+            with _jobs_lock:
+                _jobs[job_id] = {"status": "failed", "error": str(e)}
+
+    _pool.submit(_run)
+    return job_id
+
+
 @app.post("/api/v1/actions/reanalyze-missing")
 def action_reanalyze_missing(days: int = Query(3), no_fallback: bool = Query(True)):
     cfg = load_env_config(
@@ -524,6 +545,98 @@ def action_reanalyze_custom(
         }
 
     job_id = _start_job(_work)
+    return {"job_id": job_id}
+
+
+@app.post("/api/v1/actions/reanalyze-all-missing")
+def action_reanalyze_all_missing(engine: str = Query("auto", description="分析引擎: auto|k2|heuristic")):
+    """对归档中的所有运行执行分析，但仅处理尚未分析过的（anomalies.k2.jsonl 不存在或为空）。
+    已分析过的将跳过，不会复分析。实时返回任务进度。"""
+    from ..orchestrator.pipeline import parse_run, analyze_run
+    from ..utils.io import read_jsonl
+    import glob
+    import requests
+
+    cfg = load_env_config(
+        source_url=None, archive_root=ARCHIVE_ROOT, days=None)
+    k2 = K2Client(cfg.model) if cfg.model.enabled else None
+
+    # 引擎选择
+    use_k2 = None
+    if engine == "k2":
+        if not k2 or not k2.enabled():
+            return JSONResponse(status_code=400, content={"error": "K2引擎需要配置OPENAI_*环境变量"})
+        use_k2 = k2
+    elif engine == "heuristic":
+        use_k2 = None
+    else:  # auto
+        use_k2 = k2 if (k2 and k2.enabled()) else None
+
+    def _work(job_id: str):
+        pattern = os.path.join(ARCHIVE_ROOT, "*", "run_*")
+        paths = glob.glob(pattern)
+        # 仅筛选未分析的
+        to_process: list[str] = []
+        for run_dir in sorted(paths, key=lambda p: os.path.getmtime(p), reverse=True):
+            k2_path = os.path.join(run_dir, "anomalies.k2.jsonl")
+            need_analyze = (not os.path.exists(k2_path)) or (
+                os.path.exists(k2_path) and os.path.getsize(k2_path) == 0)
+            if need_analyze:
+                to_process.append(run_dir)
+
+        total = len(to_process)
+        processed: list[str] = []
+        with _jobs_lock:
+            _jobs[job_id] = {"status": "running", "current": 0,
+                             "total": total, "message": "开始分析未分析的运行"}
+
+        for idx, run_dir in enumerate(to_process, start=1):
+            try:
+                ub_path = os.path.join(run_dir, "ub.jsonl")
+                if (not os.path.exists(ub_path)) or (os.path.exists(ub_path) and os.path.getsize(ub_path) == 0):
+                    parse_run(run_dir)
+
+                # 若已有结果且非空，则跳过（安全起见再次判断）
+                k2_path = os.path.join(run_dir, "anomalies.k2.jsonl")
+                if os.path.exists(k2_path) and os.path.getsize(k2_path) > 0 and read_jsonl(k2_path):
+                    pass
+                else:
+                    analyze_run(run_dir, use_k2, ARCHIVE_ROOT,
+                                reuse_existing=True)
+                processed.append(run_dir)
+                with _jobs_lock:
+                    _jobs[job_id] = {
+                        "status": "running",
+                        "current": idx,
+                        "total": total,
+                        "message": f"处理 {os.path.basename(run_dir)} ({idx}/{total})"
+                    }
+            except Exception as e:
+                with _jobs_lock:
+                    _jobs[job_id] = {
+                        "status": "running",
+                        "current": idx,
+                        "total": total,
+                        "message": f"失败 {os.path.basename(run_dir)}: {e}"
+                    }
+
+        # 更新分析状态
+        try:
+            engine_name = ("K2" if (use_k2 and use_k2.enabled()) else (
+                "Heuristic" if engine == "heuristic" else "Auto")).upper()
+            status_data = {
+                "last_analysis_engine": engine_name,
+                "last_analysis_count": len(processed),
+                "last_analysis_criteria": "分析所有未分析"
+            }
+            requests.post(
+                "http://localhost:8000/api/v1/analysis/status", json=status_data)
+        except Exception:
+            pass
+
+        return {"processed": processed, "total": total}
+
+    job_id = _start_job_with_id(_work)
     return {"job_id": job_id}
 
 
