@@ -23,7 +23,13 @@ export function RunDetail(props: { rel: string, onBack: () => void }) {
     const [embed, setEmbed] = useState<boolean>(true)
     return (
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Button onClick={props.onBack}>返回</Button>
+            <Button onClick={() => {
+                // 标记为内部导航，避免滚动恢复
+                if ((window as any).__markInternalNav) {
+                    (window as any).__markInternalNav()
+                }
+                props.onBack()
+            }}>返回</Button>
             <Card title={`Run ${data?.rel || ''}`}>
                 <Descriptions size="small" column={2} bordered>
                     <Descriptions.Item label="日期">{data?.meta?.date || '-'}</Descriptions.Item>
@@ -51,8 +57,8 @@ export function RunDetail(props: { rel: string, onBack: () => void }) {
                 {embed && (
                     <iframe
                         src={`/files/${encodeRel(data?.rel || props.rel)}/report.html`}
-                        style={{ width: '100%', height: 800, border: '1px solid #eee', borderRadius: 6 }}
-                        title="report-preview"
+
+                        title="report-preview" style={{ width: '100%', height: 800, border: '1px solid #eee', borderRadius: 6 }}
                     />
                 )}
             </Card>

@@ -19,15 +19,33 @@ type AnalysisStatusResp = { last_analysis_time?: string, last_analysis_engine?: 
 type JobResp = { job_id: string }
 
 export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
+    // 从 localStorage 恢复分页状态
+    const getStoredState = <T,>(key: string, defaultValue: T): T => {
+        try {
+            const stored = localStorage.getItem(`ia_dashboard_${key}`)
+            return stored ? JSON.parse(stored) : defaultValue
+        } catch {
+            return defaultValue
+        }
+    }
+
+    const setStoredState = <T,>(key: string, value: T) => {
+        try {
+            localStorage.setItem(`ia_dashboard_${key}`, JSON.stringify(value))
+        } catch {
+            // 忽略存储错误
+        }
+    }
+
     // 状态：筛选/排序/分页
     const [dateRange, setDateRange] = useState<[any, any] | null>(null)
-    const [engine, setEngine] = useState<string | undefined>(undefined)
-    const [patchId, setPatchId] = useState<string>('')
-    const [abnormalOnly, setAbnormalOnly] = useState<boolean>(false)
-    const [page, setPage] = useState<number>(1)
-    const [pageSize, setPageSize] = useState<number>(20)
-    const [sortBy, setSortBy] = useState<'date' | 'total_anomalies' | 'patch_id'>('date')
-    const [order, setOrder] = useState<'asc' | 'desc'>('desc')
+    const [engine, setEngine] = useState<string | undefined>(getStoredState('engine', undefined))
+    const [patchId, setPatchId] = useState<string>(getStoredState('patchId', ''))
+    const [abnormalOnly, setAbnormalOnly] = useState<boolean>(getStoredState('abnormalOnly', false))
+    const [page, setPage] = useState<number>(getStoredState('page', 1))
+    const [pageSize, setPageSize] = useState<number>(getStoredState('pageSize', 20))
+    const [sortBy, setSortBy] = useState<'date' | 'total_anomalies' | 'patch_id'>(getStoredState('sortBy', 'date'))
+    const [order, setOrder] = useState<'asc' | 'desc'>(getStoredState('order', 'desc'))
     const allColumns = ['date', 'rel', 'patch', 'total_anomalies', 'engine', 'analysis_time', 'actions'] as const
     type ColumnKey = typeof allColumns[number]
     const [visibleCols, setVisibleCols] = useState<ColumnKey[]>(['date', 'rel', 'patch', 'total_anomalies', 'engine', 'analysis_time', 'actions'])
@@ -372,11 +390,26 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                             style={{ minWidth: 160 }}
                             options={[{ value: 'kimi-k2', label: 'kimi-k2' }, { value: 'heuristic', label: 'heuristic' }]}
                             value={engine}
-                            onChange={(v) => { setPage(1); setEngine(v) }}
+                            onChange={(v) => {
+                                setPage(1);
+                                setStoredState('page', 1);
+                                setEngine(v);
+                                setStoredState('engine', v);
+                            }}
                         />
-                        <Input placeholder="patch_id" style={{ width: 160 }} value={patchId} onChange={(e) => { setPage(1); setPatchId(e.target.value) }} />
+                        <Input placeholder="patch_id" style={{ width: 160 }} value={patchId} onChange={(e) => {
+                            setPage(1);
+                            setStoredState('page', 1);
+                            setPatchId(e.target.value);
+                            setStoredState('patchId', e.target.value);
+                        }} />
                         <span>仅异常</span>
-                        <Switch checked={abnormalOnly} onChange={(v) => { setPage(1); setAbnormalOnly(v) }} />
+                        <Switch checked={abnormalOnly} onChange={(v) => {
+                            setPage(1);
+                            setStoredState('page', 1);
+                            setAbnormalOnly(v);
+                            setStoredState('abnormalOnly', v);
+                        }} />
                         <Select
                             mode="multiple"
                             style={{ minWidth: 220 }}
@@ -423,14 +456,23 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                         loading={runs.isLoading}
                         onChange={(pg, _filters, sorter: any) => {
                             // 分页
-                            setPage(pg.current || 1)
-                            setPageSize(pg.pageSize || 20)
+                            const newPage = pg.current || 1
+                            const newPageSize = pg.pageSize || 20
+                            setPage(newPage)
+                            setPageSize(newPageSize)
+                            setStoredState('page', newPage)
+                            setStoredState('pageSize', newPageSize)
                             // 排序
                             const f = sorter.field as string | undefined
                             const ord = sorter.order as ('ascend' | 'descend' | undefined)
                             if (f && ord) {
-                                if (f === 'date' || f === 'total_anomalies' || f === 'patch_id') setSortBy(f as any)
-                                setOrder(ord === 'ascend' ? 'asc' : 'desc')
+                                if (f === 'date' || f === 'total_anomalies' || f === 'patch_id') {
+                                    setSortBy(f as any)
+                                    setStoredState('sortBy', f)
+                                }
+                                const newOrder = ord === 'ascend' ? 'asc' : 'desc'
+                                setOrder(newOrder)
+                                setStoredState('order', newOrder)
                             }
                         }}
                         pagination={{
