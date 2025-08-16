@@ -789,3 +789,104 @@ def action_crawl_data(
     return {"job_id": job_id}
 
 # 注意：此文件已直接实现 v1 路由，保留 legacy 端点以平滑迁移
+
+
+@app.get("/api/v1/config/prompt")
+def get_prompt_config():
+    """获取当前提示词配置"""
+    from ..analyzer.k2_client import PROMPT_SYSTEM
+    return {"system_prompt": PROMPT_SYSTEM}
+
+
+@app.post("/api/v1/config/prompt")
+async def update_prompt_config(request: Request):
+    """更新提示词配置（注意：这是运行时更新，重启后会重置）"""
+    import json
+    body_bytes = await request.body()
+    body = json.loads(body_bytes.decode('utf-8'))
+    new_prompt = body.get("system_prompt", "").strip()
+    if not new_prompt:
+        return JSONResponse({"error": "提示词不能为空"}, status_code=400)
+
+    # 运行时修改（重启后重置）
+    from ..analyzer import k2_client
+    k2_client.PROMPT_SYSTEM = new_prompt
+    return {"success": True, "message": "提示词已更新（重启后重置）"}
+
+
+@app.get("/api/v1/config/thresholds")
+def get_threshold_config():
+    """获取当前阈值配置"""
+    # 获取常量（如果模块中有定义的话）
+    robust_z_threshold = 3.0  # 默认值
+    pct_change_threshold = 0.3  # 默认值
+
+    try:
+        from ..analyzer.anomaly import robust_z_threshold as rzt, pct_change_threshold as pct
+        robust_z_threshold = rzt if hasattr(rzt, '__float__') else 3.0
+        pct_change_threshold = pct if hasattr(pct, '__float__') else 0.3
+    except:
+        pass
+
+    return {
+        "robust_z_threshold": robust_z_threshold,
+        "pct_change_threshold": pct_change_threshold,
+        "metrics_info": [
+            {"name": "System Benchmarks Index Score",
+                "unit": "score", "description": "UnixBench综合评分"},
+            {"name": "Dhrystone 2 using register variables",
+                "unit": "lps", "description": "寄存器变量Dhrystone测试"},
+            {"name": "Double-Precision Whetstone",
+                "unit": "MWIPS", "description": "双精度Whetstone测试"},
+            {"name": "File Copy 1024 bufsize 2000 maxblocks",
+                "unit": "KBps", "description": "文件拷贝测试(1024)"},
+            {"name": "File Copy 256 bufsize 500 maxblocks",
+                "unit": "KBps", "description": "文件拷贝测试(256)"},
+            {"name": "File Copy 4096 bufsize 8000 maxblocks",
+                "unit": "KBps", "description": "文件拷贝测试(4096)"},
+            {"name": "Pipe Throughput", "unit": "lps", "description": "管道吞吐量测试"},
+            {"name": "Pipe-based Context Switching",
+                "unit": "lps", "description": "基于管道的上下文切换"},
+            {"name": "Process Creation", "unit": "lps", "description": "进程创建测试"},
+            {"name": "Shell Scripts (1 concurrent)",
+             "unit": "lpm", "description": "单并发Shell脚本"},
+            {"name": "Shell Scripts (8 concurrent)",
+             "unit": "lpm", "description": "8并发Shell脚本"},
+            {"name": "System Call Overhead", "unit": "lps", "description": "系统调用开销测试"}
+        ]
+    }
+
+
+@app.post("/api/v1/config/thresholds")
+async def update_threshold_config(request: Request):
+    """更新阈值配置（注意：这是运行时更新，重启后会重置）"""
+    import json
+    body_bytes = await request.body()
+    body = json.loads(body_bytes.decode('utf-8'))
+
+    robust_z = body.get("robust_z_threshold")
+    pct_change = body.get("pct_change_threshold")
+
+    if robust_z is not None:
+        if not isinstance(robust_z, (int, float)) or robust_z <= 0:
+            return JSONResponse({"error": "robust_z_threshold 必须是正数"}, status_code=400)
+        try:
+            from ..analyzer import anomaly
+            # 尝试设置模块级变量（如果存在的话）
+            if hasattr(anomaly, 'ROBUST_Z_THRESHOLD'):
+                anomaly.ROBUST_Z_THRESHOLD = float(robust_z)
+        except:
+            pass
+
+    if pct_change is not None:
+        if not isinstance(pct_change, (int, float)) or pct_change <= 0 or pct_change > 1:
+            return JSONResponse({"error": "pct_change_threshold 必须在(0,1]范围内"}, status_code=400)
+        try:
+            from ..analyzer import anomaly
+            # 尝试设置模块级变量（如果存在的话）
+            if hasattr(anomaly, 'PCT_CHANGE_THRESHOLD'):
+                anomaly.PCT_CHANGE_THRESHOLD = float(pct_change)
+        except:
+            pass
+
+    return {"success": True, "message": "阈值已更新（重启后重置）"}

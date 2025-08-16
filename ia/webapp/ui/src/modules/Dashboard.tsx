@@ -263,10 +263,55 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                     <ChartCard
                         title="UB 总分趋势"
                         option={{
-                            tooltip: { trigger: 'axis' },
-                            xAxis: { type: 'category', data: (series.data?.series || []).map(p => p.date) },
-                            yAxis: { type: 'value', name: 'Score' },
-                            series: [{ type: 'line', smooth: true, data: (series.data?.series || []).map(p => p.value) }]
+                            tooltip: {
+                                trigger: 'axis', formatter: (params: any) => {
+                                    const point = params[0]
+                                    return `${point.axisValue}<br/>Score: ${point.value}`
+                                }
+                            },
+                            xAxis: {
+                                type: 'category',
+                                data: (series.data?.series || []).map(p => p.date),
+                                axisLabel: { rotate: 45 }
+                            },
+                            yAxis: {
+                                type: 'value',
+                                name: 'Score',
+                                // 动态调整Y轴范围，突出波动
+                                min: (value: any) => {
+                                    const values = (series.data?.series || []).map(p => p.value).filter(v => isFinite(v))
+                                    if (values.length === 0) return 'dataMin'
+                                    const minVal = Math.min(...values)
+                                    const maxVal = Math.max(...values)
+                                    const range = maxVal - minVal
+                                    // 如果变化幅度很小，则扩大显示范围
+                                    if (range < maxVal * 0.1) {
+                                        return Math.max(0, minVal - maxVal * 0.05)
+                                    }
+                                    return Math.max(0, minVal - range * 0.1)
+                                },
+                                max: (value: any) => {
+                                    const values = (series.data?.series || []).map(p => p.value).filter(v => isFinite(v))
+                                    if (values.length === 0) return 'dataMax'
+                                    const minVal = Math.min(...values)
+                                    const maxVal = Math.max(...values)
+                                    const range = maxVal - minVal
+                                    // 如果变化幅度很小，则扩大显示范围
+                                    if (range < maxVal * 0.1) {
+                                        return maxVal + maxVal * 0.05
+                                    }
+                                    return maxVal + range * 0.1
+                                }
+                            },
+                            series: [{
+                                type: 'line',
+                                smooth: true,
+                                data: (series.data?.series || []).map(p => p.value),
+                                lineStyle: { width: 2 },
+                                symbol: 'circle',
+                                symbolSize: 6,
+                                emphasis: { focus: 'series' }
+                            }]
                         }}
                     />
                 </Col>
@@ -343,18 +388,80 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                     <ChartCard
                         title="UB 总分箱线图（最近30点）"
                         option={{
-                            tooltip: { trigger: 'item' },
-                            xAxis: { type: 'category', data: ['Score'] },
-                            yAxis: { type: 'value' },
+                            tooltip: {
+                                trigger: 'item',
+                                formatter: (params: any) => {
+                                    if (params.componentType === 'series' && params.seriesType === 'boxplot') {
+                                        const [min, q1, median, q3, max] = params.value
+                                        return `
+                                            最大值: ${max}<br/>
+                                            75%分位: ${q3}<br/>
+                                            中位数: ${median}<br/>
+                                            25%分位: ${q1}<br/>
+                                            最小值: ${min}
+                                        `
+                                    }
+                                    return ''
+                                }
+                            },
+                            grid: { left: 80, right: 40, top: 40, bottom: 60 },
+                            xAxis: {
+                                type: 'category',
+                                data: ['总分分布'],
+                                axisLabel: { fontSize: 14 }
+                            },
+                            yAxis: {
+                                type: 'value',
+                                name: 'Score',
+                                nameTextStyle: { fontSize: 14 },
+                                // 动态调整Y轴范围以突出箱线图
+                                min: (value: any) => {
+                                    const arr = (series.data?.series || []).slice(-30).map(p => p.value).filter(v => isFinite(v)).sort((a, b) => a - b)
+                                    if (!arr.length) return 'dataMin'
+                                    const min = arr[0]
+                                    const max = arr[arr.length - 1]
+                                    const range = max - min
+                                    return Math.max(0, min - range * 0.15)
+                                },
+                                max: (value: any) => {
+                                    const arr = (series.data?.series || []).slice(-30).map(p => p.value).filter(v => isFinite(v)).sort((a, b) => a - b)
+                                    if (!arr.length) return 'dataMax'
+                                    const min = arr[0]
+                                    const max = arr[arr.length - 1]
+                                    const range = max - min
+                                    return max + range * 0.15
+                                }
+                            },
                             series: [{
                                 type: 'boxplot',
                                 data: (() => {
-                                    const arr = (series.data?.series || []).slice(-30).map(p => p.value).sort((a, b) => a - b)
+                                    const arr = (series.data?.series || []).slice(-30).map(p => p.value).filter(v => isFinite(v)).sort((a, b) => a - b)
                                     if (!arr.length) return []
-                                    const q = (p: number) => arr[Math.floor((arr.length - 1) * p)]
-                                    const min = arr[0], max = arr[arr.length - 1], q1 = q(0.25), q2 = q(0.5), q3 = q(0.75)
+                                    const q = (p: number) => {
+                                        const index = (arr.length - 1) * p
+                                        const lower = Math.floor(index)
+                                        const upper = Math.ceil(index)
+                                        const weight = index % 1
+                                        return arr[lower] * (1 - weight) + arr[upper] * weight
+                                    }
+                                    const min = arr[0]
+                                    const max = arr[arr.length - 1]
+                                    const q1 = q(0.25)
+                                    const q2 = q(0.5)  // 中位数
+                                    const q3 = q(0.75)
                                     return [[min, q1, q2, q3, max]]
-                                })()
+                                })(),
+                                boxWidth: ['20%', '20%'],  // 设置箱体宽度
+                                itemStyle: {
+                                    borderColor: '#1677ff',
+                                    borderWidth: 2
+                                },
+                                emphasis: {
+                                    itemStyle: {
+                                        borderColor: '#40a9ff',
+                                        borderWidth: 3
+                                    }
+                                }
                             }]
                         }}
                     />
