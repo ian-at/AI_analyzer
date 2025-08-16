@@ -386,6 +386,25 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
             <Row gutter={16}>
                 <Col span={24}>
                     <ChartCard
+                        title="异常严重度堆叠折线（按日）"
+                        option={{
+                            tooltip: { trigger: 'axis' },
+                            legend: { data: ['high', 'medium', 'low'] },
+                            xAxis: { type: 'category', data: (tl.data?.items || []).map(i => i.date) },
+                            yAxis: { type: 'value' },
+                            series: [
+                                { type: 'line', name: 'high', stack: 'sev', areaStyle: {}, data: (tl.data?.items || []).map(i => (i as any).high || 0) },
+                                { type: 'line', name: 'medium', stack: 'sev', areaStyle: {}, data: (tl.data?.items || []).map(i => (i as any).medium || 0) },
+                                { type: 'line', name: 'low', stack: 'sev', areaStyle: {}, data: (tl.data?.items || []).map(i => (i as any).low || 0) },
+                            ]
+                        }}
+                    />
+                </Col>
+            </Row>
+
+            <Row gutter={16}>
+                <Col span={24}>
+                    <ChartCard
                         title="UB 总分箱线图（最近30点）"
                         option={{
                             tooltip: {
@@ -468,25 +487,6 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                 </Col>
             </Row>
 
-            <Row gutter={16}>
-                <Col span={24}>
-                    <ChartCard
-                        title="异常严重度堆叠折线（按日）"
-                        option={{
-                            tooltip: { trigger: 'axis' },
-                            legend: { data: ['high', 'medium', 'low'] },
-                            xAxis: { type: 'category', data: (tl.data?.items || []).map(i => i.date) },
-                            yAxis: { type: 'value' },
-                            series: [
-                                { type: 'line', name: 'high', stack: 'sev', areaStyle: {}, data: (tl.data?.items || []).map(i => (i as any).high || 0) },
-                                { type: 'line', name: 'medium', stack: 'sev', areaStyle: {}, data: (tl.data?.items || []).map(i => (i as any).medium || 0) },
-                                { type: 'line', name: 'low', stack: 'sev', areaStyle: {}, data: (tl.data?.items || []).map(i => (i as any).low || 0) },
-                            ]
-                        }}
-                    />
-                </Col>
-            </Row>
-
             <Card title="运行列表">
                 <Space direction="vertical" style={{ width: '100%' }} size={12}>
                     <Space wrap>
@@ -524,22 +524,137 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                             onChange={(v) => setVisibleCols(v as ColumnKey[])}
                             options={allColumns.map(k => ({ label: k, value: k }))}
                         />
-                        <Button onClick={() => {
+
+                        <Button onClick={async () => {
                             try {
-                                const rows = (runs.data?.runs || [])
-                                const cols = visibleCols
-                                const csvHeader = cols.join(',')
-                                const toCell = (r: any, k: ColumnKey) => {
-                                    if (k === 'patch') return `${r.patch_id || ''}/${r.patch_set || ''}`
-                                    return r[k] ?? (k === 'engine' ? (r.engine?.name || '') : '')
+                                // 分批获取所有数据
+                                const batchSize = 100 // 每次获取100条记录
+                                let allRows: any[] = []
+                                let page = 1
+                                let hasMore = true
+
+                                while (hasMore) {
+                                    const params = new URLSearchParams()
+                                    params.set('page', String(page))
+                                    params.set('page_size', String(batchSize))
+                                    params.set('sort_by', sortBy)
+                                    params.set('order', order)
+                                    if (abnormalOnly) params.set('abnormal_only', 'true')
+                                    if (engine && engine.trim()) params.set('engine', engine)
+                                    if (patchId && patchId.trim()) params.set('patch_id', patchId.trim())
+                                    if (dateRange && dateRange[0] && dateRange[1]) {
+                                        try { params.set('start', dateRange[0].format('YYYY-MM-DD')); params.set('end', dateRange[1].format('YYYY-MM-DD')) } catch { /* ignore */ }
+                                    }
+                                    // 确保获取所有必要字段
+                                    params.set('fields', 'rel,date,patch_id,patch_set,total_anomalies,engine,analysis_time')
+
+                                    const batchUrl = `/api/v1/runs?${params.toString()}`
+                                    const response = await fetch(batchUrl)
+                                    if (!response.ok) {
+                                        throw new Error(`获取数据失败: ${response.status}`)
+                                    }
+                                    const batchData = await response.json()
+                                    const batchRows = batchData.runs || []
+
+                                    allRows = allRows.concat(batchRows)
+
+                                    // 检查是否还有更多数据
+                                    if (batchRows.length < batchSize) {
+                                        hasMore = false
+                                    } else {
+                                        page++
+                                    }
+
+                                    // 防止无限循环，最多获取5000条记录
+                                    if (allRows.length >= 5000) {
+                                        message.warning('数据量过大，仅导出前5000条记录')
+                                        hasMore = false
+                                    }
                                 }
-                                const csvRows = rows.map(r => cols.map(k => String(toCell(r, k)).replaceAll('"', '""')).map(x => `"${x}"`).join(','))
-                                const csv = [csvHeader, ...csvRows].join('\n')
-                                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+
+                                const rows = allRows
+
+                                if (rows.length === 0) {
+                                    message.warning('没有数据可导出')
+                                    return
+                                }
+
+                                // 过滤掉 actions 列，只导出数据列
+                                const exportCols = visibleCols.filter(k => k !== 'actions')
+
+                                // 转换列名为中文表头
+                                const headerMap: Record<ColumnKey, string> = {
+                                    'date': '日期',
+                                    'rel': '运行ID',
+                                    'patch': '补丁',
+                                    'total_anomalies': '异常数',
+                                    'engine': '分析引擎',
+                                    'analysis_time': '分析时间',
+                                    'actions': '操作'
+                                }
+
+                                const toCell = (r: any, k: ColumnKey) => {
+                                    switch (k) {
+                                        case 'date':
+                                            return r.date || ''
+                                        case 'rel':
+                                            // 提取运行ID部分，去掉日期前缀 (如：2025-08-16/run_p2299_ps1 -> run_p2299_ps1)
+                                            const rel = r.rel || ''
+                                            const parts = rel.split('/')
+                                            return parts.length > 1 ? parts[1] : rel
+                                        case 'patch':
+                                            // 使用Excel文本格式标识符，防止自动转换为日期
+                                            const patchValue = `${r.patch_id || ''}/${r.patch_set || ''}`
+                                            return `="${patchValue}"`
+                                        case 'engine':
+                                            const engineName = r.engine?.name || ''
+                                            const degraded = r.engine?.degraded ? '(降级)' : ''
+                                            return engineName + degraded
+                                        case 'analysis_time':
+                                            return r.analysis_time ? new Date(r.analysis_time).toLocaleString('zh-CN') : ''
+                                        case 'total_anomalies':
+                                            return r.total_anomalies || 0
+                                        default:
+                                            return r[k] || ''
+                                    }
+                                }
+
+                                // 使用CSV格式，但确保每个字段正确分离
+                                const headers = exportCols.map(k => headerMap[k] || k)
+                                const csvHeader = headers.join(',')
+
+                                const csvRows = rows.map(r =>
+                                    exportCols.map(k => {
+                                        const value = String(toCell(r, k))
+                                        // 正确处理CSV转义：包含逗号、引号或换行符的字段用双引号包围
+                                        if (value.includes(',') || value.includes('"') || value.includes('\n') || value.includes('\r')) {
+                                            return `"${value.replace(/"/g, '""')}"`
+                                        }
+                                        return value
+                                    }).join(',')
+                                )
+
+                                const csvContent = [csvHeader, ...csvRows].join('\n')
+
+                                // 添加BOM以确保中文正确显示，使用正确的CSV MIME类型
+                                const BOM = '\uFEFF'
+                                const blob = new Blob([BOM + csvContent], {
+                                    type: 'text/csv;charset=utf-8'
+                                })
+
                                 const url = URL.createObjectURL(blob)
-                                const a = document.createElement('a'); a.href = url; a.download = `runs_${Date.now()}.csv`; a.click(); URL.revokeObjectURL(url)
-                            } catch (e) { message.error('导出失败') }
-                        }}>导出CSV</Button>
+                                const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
+                                const a = document.createElement('a')
+                                a.href = url
+                                a.download = `UB分析数据_${timestamp}.csv`
+                                a.click()
+                                URL.revokeObjectURL(url)
+                                message.success(`已导出Excel兼容文件 ${rows.length} 条记录`)
+                            } catch (e) {
+                                console.error('Excel导出错误:', e)
+                                message.error('Excel导出失败: ' + String(e))
+                            }
+                        }}>导出Excel</Button>
                         <Button type="primary" onClick={() => {
                             analysisForm.resetFields()
                             setShowAnalysisModal(true)
