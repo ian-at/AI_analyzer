@@ -35,6 +35,7 @@ PROMPT_SYSTEM = (
     "- 阈值建议：abs(robust_z)≥3 或 |Δ vs median|≥30% 或 |Δ vs mean|≥30% 时可以判为异常；边界情况应谨慎，证据不足时判为非异常。\n"
     "- 方向性：明确说明异常是“性能下降”还是“性能提升”，并用当前值与历史对比定量描述。\n"
     "- 根因与证据：每个异常必须给出 primary_reason 与至少一个 root_cause（含 likelihood 0~1），并在 supporting_evidence 中引用具体特征（如历史样本数、robust_z、Δ% 等）。\n"
+    "- 置信度：每个异常项必须包含 confidence 字段（0~1之间的数值），不可为null或省略，基于统计证据强度评估。\n"
     "- 环境：目标平台为 ARM64，Linux 内核 pKVM 场景（EL1/EL2）。常见影响因素包括：CPU 频率/能效策略（cpufreq governor: performance/powersave/schedutil）、热限频、big.LITTLE 调度失衡、中断亲和与 IRQ 绑核、cgroup/cpuset/rt 限制、隔离核/IRQ 亲和（isolcpus/nohz_full）、虚拟化开销（EL2 trap/PMU 虚拟化/阶段页表）、页大小/THP、缓存/内存带宽与 NUMA（若存在）、编译器优化与链接方式、二进制是否被重新编译、内核/固件配置变更等。\n"
     "- 术语边界：请避免输出 x86 专有概念（如 SMT/Turbo Boost 等），优先给出 ARM64/pKVM 相关表述。\n"
     "- 语言：除专有名词外，所有自然语言字段请使用中文表达（含 primary_reason、root_causes.cause、suggested_next_checks 等）。\n"
@@ -96,7 +97,7 @@ class K2Client:
             },
             "output_schema": JSON_SCHEMA_DESC,
             "instructions": (
-                "严格返回有效 JSON；不要包含 markdown；每个异常需包含 severity 与 confidence；"
+                "严格返回有效 JSON；不要包含 markdown；每个异常项必须包含 severity 和 confidence 字段，confidence 必须是0~1之间的数值，不可为null；"
                 "结合 features（如 robust_z、pct_change_vs_median、pct_change_vs_mean、mean、median、history_n、current_value）给出根因与证据引用；"
                 "若证据不足，请不要硬判异常；所有自然语言字段必须使用中文；结合 ARM64 与 pKVM 场景优先给出相关根因，避免 x86 专属术语。"
             ),

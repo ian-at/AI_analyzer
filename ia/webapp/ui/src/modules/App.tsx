@@ -101,6 +101,12 @@ export function App() {
                 type: 'text' as const
             },
             {
+                key: 'confidence_requirement',
+                label: '置信度要求',
+                value: extractValue(prompt, /置信度：(.+?)(?=\n-|\n\n|$)/, '每个异常项必须包含 confidence 字段（0~1之间的数值），不可为null或省略'),
+                type: 'textarea' as const
+            },
+            {
                 key: 'output_format',
                 label: '输出格式',
                 value: extractValue(prompt, /输出：(.+?)(?=；|$)/, 'confidence 返回 0~1 的小数；严格按 JSON 输出'),
@@ -131,6 +137,7 @@ export function App() {
 - 阈值建议：abs(robust_z)≥${configMap.robust_z_threshold || '3'} 或 |Δ vs median|≥${configMap.median_threshold || '30'}% 或 |Δ vs mean|≥${configMap.mean_threshold || '30'}% 时可以判为异常；边界情况应谨慎，证据不足时判为非异常。
 - 方向性：明确说明异常是"性能下降"还是"性能提升"，并用当前值与历史对比定量描述。
 - 根因与证据：每个异常必须给出 primary_reason 与至少一个 root_cause（含 likelihood 0~1），并在 supporting_evidence 中引用具体特征（如历史样本数、robust_z、Δ% 等）。
+- 置信度：${configMap.confidence_requirement || '每个异常项必须包含 confidence 字段（0~1之间的数值），不可为null或省略，基于统计证据强度评估'}。
 - 环境：目标平台为 ${configMap.platform || 'ARM64'}，${configMap.environment || 'Linux 内核 pKVM 场景（EL1/EL2）'}。常见影响因素包括：${configMap.common_factors || 'CPU 频率/能效策略、热限频、big.LITTLE 调度失衡、中断亲和与 IRQ 绑核、cgroup/cpuset/rt 限制、虚拟化开销等'}。
 - 术语边界：请避免输出 x86 专有概念（如 SMT/Turbo Boost 等），优先给出 ARM64/pKVM 相关表述。
 - 语言：除专有名词外，所有自然语言字段请使用${configMap.language || '中文'}表达（含 primary_reason、root_causes.cause、suggested_next_checks 等）。
