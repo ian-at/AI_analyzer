@@ -261,7 +261,13 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
             <Row gutter={16}>
                 <Col span={12}>
                     <ChartCard
-                        title="UB 总分趋势"
+                        title={(() => {
+                            const values = (series.data?.series || []).map(p => p.value).filter(v => isFinite(v))
+                            if (values.length === 0) return "UB 总分趋势"
+                            const minVal = Math.min(...values)
+                            const maxVal = Math.max(...values)
+                            return `UB 总分趋势 (最高: ${maxVal.toFixed(1)}, 最低: ${minVal.toFixed(1)})`
+                        })()}
                         option={{
                             tooltip: {
                                 trigger: 'axis', formatter: (params: any) => {
@@ -319,8 +325,39 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                     <ChartCard
                         title="异常占比"
                         option={{
-                            tooltip: { trigger: 'item' },
-                            series: [{ type: 'pie', radius: ['40%', '70%'], data: (() => { const sc = summary.data?.severity_counts || { high: 0, medium: 0, low: 0 }; return [{ name: 'high', value: sc.high }, { name: 'medium', value: sc.medium }, { name: 'low', value: sc.low }] })() }]
+                            tooltip: {
+                                trigger: 'item',
+                                formatter: (params: any) => {
+                                    const { name, value, percent } = params
+                                    return `${name}: ${value} 个 (${percent}%)`
+                                }
+                            },
+                            legend: {
+                                bottom: 10,
+                                formatter: (name: string) => {
+                                    const sc = summary.data?.severity_counts || { high: 0, medium: 0, low: 0 }
+                                    const counts = { high: sc.high, medium: sc.medium, low: sc.low }
+                                    return `${name} (${(counts as any)[name] || 0})`
+                                }
+                            },
+                            series: [{
+                                type: 'pie',
+                                radius: ['40%', '70%'],
+                                data: (() => {
+                                    const sc = summary.data?.severity_counts || { high: 0, medium: 0, low: 0 }
+                                    return [
+                                        { name: 'high', value: sc.high },
+                                        { name: 'medium', value: sc.medium },
+                                        { name: 'low', value: sc.low }
+                                    ]
+                                })(),
+                                label: {
+                                    formatter: (params: any) => {
+                                        const { name, value, percent } = params
+                                        return `${name}\n${value} (${percent}%)`
+                                    }
+                                }
+                            }]
                         }}
                     />
                 </Col>
