@@ -27,8 +27,46 @@ async function postJSON<T>(url: string, data: any): Promise<T> {
 }
 
 export function App() {
-    const [page, setPage] = useState<Page>('dashboard')
-    const [rel, setRel] = useState<string>('')
+    // 从URL读取初始状态
+    const getInitialState = () => {
+        const hash = window.location.hash.slice(1) // 移除 #
+        if (hash.startsWith('/run/')) {
+            const rel = decodeURIComponent(hash.slice(5)) // 移除 '/run/'
+            return { page: 'run' as Page, rel }
+        }
+        return { page: 'dashboard' as Page, rel: '' }
+    }
+
+    const [page, setPage] = useState<Page>(getInitialState().page)
+    const [rel, setRel] = useState<string>(getInitialState().rel)
+
+    // 监听URL变化
+    React.useEffect(() => {
+        const handleHashChange = () => {
+            const state = getInitialState()
+            setPage(state.page)
+            setRel(state.rel)
+        }
+
+        window.addEventListener('hashchange', handleHashChange)
+        return () => window.removeEventListener('hashchange', handleHashChange)
+    }, [])
+
+    // 初始化URL（如果没有hash则设置为dashboard）
+    React.useEffect(() => {
+        if (!window.location.hash) {
+            window.location.hash = '#/dashboard'
+        }
+    }, [])
+
+    // 更新URL的辅助函数
+    const updateURL = (newPage: Page, newRel?: string) => {
+        if (newPage === 'dashboard') {
+            window.location.hash = '#/dashboard'
+        } else if (newPage === 'run' && newRel) {
+            window.location.hash = `#/run/${encodeURIComponent(newRel)}`
+        }
+    }
 
     // 菜单状态
     const [configModalVisible, setConfigModalVisible] = useState(false)
@@ -211,8 +249,15 @@ export function App() {
     ]
 
     const content = useMemo(() => {
-        if (page === 'dashboard') return <Dashboard onOpenRun={(r) => { setRel(r); setPage('run') }} />
-        return <RunDetail rel={rel} onBack={() => setPage('dashboard')} />
+        if (page === 'dashboard') return <Dashboard onOpenRun={(r) => {
+            setRel(r);
+            setPage('run');
+            updateURL('run', r);
+        }} />
+        return <RunDetail rel={rel} onBack={() => {
+            setPage('dashboard');
+            updateURL('dashboard');
+        }} />
     }, [page, rel])
 
     return (
