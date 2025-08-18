@@ -297,7 +297,9 @@ def _html_template(embed_json: str, title: str) -> str:
           `<div class=\"suggestion-item\">${s}</div>`
         ).join('');
 
-        const evidence = (a.supporting_evidence || []).join('; ');
+        const evidence = Array.isArray(a.supporting_evidence) ?
+          a.supporting_evidence.join('; ') :
+          (a.supporting_evidence || '');
 
         // 构建更友好的标题
         let titleParts = [];

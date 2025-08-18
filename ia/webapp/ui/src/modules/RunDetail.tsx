@@ -97,7 +97,7 @@ export function RunDetail(props: { rel: string, onBack: () => void }) {
                 >
                     {embed && (
                         <iframe
-                            src={`/files/${encodeRel(data?.rel || props.rel)}/report.html`}
+                            src={`/files/${encodeRel(data?.rel || props.rel)}/report.html?t=${Date.now()}`}
 
                             title="report-preview" style={{ width: '100%', height: 800, border: '1px solid #eee', borderRadius: 6 }}
                         />
