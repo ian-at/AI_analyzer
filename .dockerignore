@@ -1,28 +1,60 @@
-# Node
-aia/webapp/ui/node_modules/
-**/node_modules/
+# Git相关
+.git
+.gitignore
 
-# Build output
+# 构建产物和缓存
+ia/webapp/ui/node_modules/
+ia/webapp/ui/dist/
+ia/webapp/ui/.vite/
 ia/webapp/static/ui/
-**/dist/
-**/build/
-
-# Python caches
-__pycache__/
 **/__pycache__/
-*.py[cod]
-.mypy_cache/
-.pytest_cache/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.Python
+*.so
 
-# Local config / archives
-config.json
-archive/
-
-# VCS/IDE
-.git/
+# 开发工具
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
-# Logs
-/tmp/ia_webapp.log
-nohup.out
+# 数据和日志
+archive/
+logs/
+*.log
+
+# 测试和覆盖率
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+
+# 环境和配置
+.env
+.env.local
+.env.*.local
+*.env
+config.json
+
+# 临时文件
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# Docker相关
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# 文档
+README.md
+docs/
+*.md
+
+# 分支相关
+ia-*
