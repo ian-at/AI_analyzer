@@ -56,14 +56,49 @@ def pct_change_vs_mean(current: float, history: list[float]) -> float | None:
 def load_history_for_keys(
     archive_root: str,
     keys: list[tuple[str, str, str]],
-    max_runs: int = 20,
+    max_runs: int = None,
 ) -> dict[tuple[str, str, str], list[float]]:
-    """扫描归档中的历史 run，为每个 (suite, case, metric) 构建数值历史数组。"""
+    """扫描归档中的历史 run，为每个 (suite, case, metric) 构建数值历史数组。
+
+    如果 max_runs 为 None，则使用所有可用的历史数据：
+    - 首先统计总的可用历史数据量
+    - 使用所有可用数据作为样本，确保基线随数据积累越来越准确
+    - 最少使用10个样本（统计意义的最低要求）
+    """
     # 朴素扫描：遍历归档下所有 ub.jsonl（按新到旧）
     pattern = os.path.join(archive_root, "*", "run_*", "ub.jsonl")
     files = sorted(glob.glob(pattern), reverse=True)
     key_set = set(keys)
     history: dict[tuple[str, str, str], list[float]] = defaultdict(list)
+
+    # 如果未指定max_runs，先进行一次完整扫描来确定动态样本数
+    if max_runs is None:
+        # 统计每个key的总可用数据量
+        total_counts: dict[tuple[str, str, str], int] = defaultdict(int)
+        for path in files:
+            rows = read_jsonl(path)
+            for row in rows:
+                k = (row.get("suite", ""), row.get(
+                    "case", ""), row.get("metric", ""))
+                if k in key_set:
+                    try:
+                        float(row.get("value"))  # 验证是否为有效数值
+                        total_counts[k] += 1
+                    except Exception:
+                        continue
+
+        # 使用所有可用的历史数据作为样本（最少10个确保统计意义）
+        if total_counts:
+            avg_available = sum(total_counts.values()
+                                ) // len(total_counts) if total_counts else 30
+            max_available = max(total_counts.values()) if total_counts else 30
+            # 使用所有可用数据，不设置上限，确保基线越来越准确
+            max_runs = max(10, max_available)
+            print(
+                f"使用所有历史数据: 平均可用数据{avg_available}个, 最大可用数据{max_available}个, 将使用{max_runs}个样本")
+        else:
+            max_runs = 30  # 默认值
+            print(f"未找到历史数据，使用默认样本数: {max_runs}")
 
     for path in files:
         rows = read_jsonl(path)

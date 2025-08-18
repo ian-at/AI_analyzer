@@ -101,7 +101,7 @@ def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_exis
     # 构建 (suite, case, metric) 粒度的历史数据
     keys = [(e.get("suite", ""), e.get("case", ""), e.get("metric", ""))
             for e in entries]
-    history = load_history_for_keys(archive_root, keys, max_runs=20)
+    history = load_history_for_keys(archive_root, keys)
 
     anomalies: list[dict[str, Any]] = []
     # 若已有 K2 结果且非空，直接复用，避免重复调用
