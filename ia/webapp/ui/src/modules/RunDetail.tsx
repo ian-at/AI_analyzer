@@ -74,7 +74,7 @@ export function RunDetail(props: { rel: string, onBack: () => void }) {
                 <Card title={`Run ${data?.rel || ''}`}>
                     <Descriptions size="small" column={2} bordered>
                         <Descriptions.Item label="日期">{data?.meta?.date || '-'}</Descriptions.Item>
-                        <Descriptions.Item label="Patch">{data?.meta?.patch_id || ''}/{data?.meta?.patch_set || ''}</Descriptions.Item>
+                        <Descriptions.Item label="补丁">{data?.meta?.patch_id || ''}/{data?.meta?.patch_set || ''}</Descriptions.Item>
                         <Descriptions.Item label="总异常">{data?.summary?.total_anomalies || 0}</Descriptions.Item>
                         <Descriptions.Item label="引擎">
                             {data?.summary?.analysis_engine?.name || '-'}
@@ -113,14 +113,18 @@ export function RunDetail(props: { rel: string, onBack: () => void }) {
                     </div>
                 </Card>
                 <Card title="异常列表">
-                    <Table dataSource={(data?.anomalies || []).map((a, i) => ({ key: i, ...a }))} size="small" pagination={{ pageSize: 10 }} columns={[
-                        { title: 'suite', dataIndex: 'suite' },
-                        { title: 'case', dataIndex: 'case' },
-                        { title: 'metric', dataIndex: 'metric' },
-                        { title: 'value', dataIndex: 'current_value' },
-                        { title: 'severity', dataIndex: 'severity' },
-                        { title: 'confidence', dataIndex: 'confidence' },
-                        { title: 'reason', dataIndex: 'primary_reason' },
+                    <Table dataSource={(data?.anomalies || []).map((a, i) => ({ key: i, ...a }))} size="small" pagination={{
+                        pageSize: 10,
+                        showTotal: (total: number, range: [number, number]) => `第 ${range[0]}-${range[1]} 条，共 ${total} 条`,
+                        showSizeChanger: true,
+                    }} columns={[
+                        { title: '测试套件', dataIndex: 'suite' },
+                        { title: '测试用例', dataIndex: 'case' },
+                        { title: '指标', dataIndex: 'metric' },
+                        { title: '当前值', dataIndex: 'current_value' },
+                        { title: '严重程度', dataIndex: 'severity' },
+                        { title: '置信度', dataIndex: 'confidence' },
+                        { title: '原因', dataIndex: 'primary_reason' },
                     ]} />
                 </Card>
             </Space>

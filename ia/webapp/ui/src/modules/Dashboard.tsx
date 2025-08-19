@@ -272,7 +272,7 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                             tooltip: {
                                 trigger: 'axis', formatter: (params: any) => {
                                     const point = params[0]
-                                    return `${point.axisValue}<br/>Score: ${point.value}`
+                                    return `${point.axisValue}<br/>得分: ${point.value}`
                                 }
                             },
                             xAxis: {
@@ -282,7 +282,7 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                             },
                             yAxis: {
                                 type: 'value',
-                                name: 'Score',
+                                name: '得分',
                                 // 动态调整Y轴范围，突出波动
                                 min: (value: any) => {
                                     const values = (series.data?.series || []).map(p => p.value).filter(v => isFinite(v))
@@ -346,9 +346,9 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                                 data: (() => {
                                     const sc = summary.data?.severity_counts || { high: 0, medium: 0, low: 0 }
                                     return [
-                                        { name: 'high', value: sc.high },
-                                        { name: 'medium', value: sc.medium },
-                                        { name: 'low', value: sc.low }
+                                        { name: '高危', value: sc.high },
+                                        { name: '中危', value: sc.medium },
+                                        { name: '低危', value: sc.low }
                                     ]
                                 })(),
                                 label: {
@@ -386,7 +386,7 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                         option={{
                             tooltip: {},
                             xAxis: { type: 'category', data: (top.data?.items || []).map(i => i.metric.split('::').slice(-1)[0]) },
-                            yAxis: { type: 'value', name: '% Δ' },
+                            yAxis: { type: 'value', name: '百分比变化' },
                             series: [{ type: 'bar', data: (top.data?.items || []).map(i => Math.round(i.pct_change * 1000) / 10) }]
                         }}
                     />
@@ -412,7 +412,7 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                             tooltip: { position: 'top' },
                             grid: { height: '60%', top: '10%' },
                             xAxis: { type: 'category', data: (tl.data?.items || []).map(i => i.date), splitArea: { show: true } },
-                            yAxis: { type: 'category', data: ['high', 'medium', 'low'], splitArea: { show: true } },
+                            yAxis: { type: 'category', data: ['高危', '中危', '低危'], splitArea: { show: true } },
                             visualMap: { min: 0, max: Math.max(1, ...(tl.data?.items || []).map(i => Math.max((i as any).high || 0, (i as any).medium || 0, (i as any).low || 0))), calculable: true, orient: 'horizontal', left: 'center', bottom: 0 },
                             series: [{ type: 'heatmap', data: (() => { const items = (tl.data?.items || []); const out: any[] = []; const ys = ['high', 'medium', 'low']; items.forEach((d, xi) => { ys.forEach((y, yi) => { out.push([xi, yi, (d as any)[y] || 0]) }) }); return out })(), emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.3)' } } }]
                         }}
@@ -426,13 +426,13 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                         title="异常严重度堆叠折线（按日）"
                         option={{
                             tooltip: { trigger: 'axis' },
-                            legend: { data: ['high', 'medium', 'low'] },
+                            legend: { data: ['高危', '中危', '低危'] },
                             xAxis: { type: 'category', data: (tl.data?.items || []).map(i => i.date) },
                             yAxis: { type: 'value' },
                             series: [
-                                { type: 'line', name: 'high', stack: 'sev', areaStyle: {}, data: (tl.data?.items || []).map(i => (i as any).high || 0) },
-                                { type: 'line', name: 'medium', stack: 'sev', areaStyle: {}, data: (tl.data?.items || []).map(i => (i as any).medium || 0) },
-                                { type: 'line', name: 'low', stack: 'sev', areaStyle: {}, data: (tl.data?.items || []).map(i => (i as any).low || 0) },
+                                { type: 'line', name: '高危', stack: 'sev', areaStyle: {}, data: (tl.data?.items || []).map(i => (i as any).high || 0) },
+                                { type: 'line', name: '中危', stack: 'sev', areaStyle: {}, data: (tl.data?.items || []).map(i => (i as any).medium || 0) },
+                                { type: 'line', name: '低危', stack: 'sev', areaStyle: {}, data: (tl.data?.items || []).map(i => (i as any).low || 0) },
                             ]
                         }}
                     />
@@ -468,7 +468,7 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                             },
                             yAxis: {
                                 type: 'value',
-                                name: 'Score',
+                                name: '得分',
                                 nameTextStyle: { fontSize: 14 },
                                 // 动态调整Y轴范围以突出箱线图
                                 min: (value: any) => {
@@ -527,10 +527,13 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
             <Card title="运行列表">
                 <Space direction="vertical" style={{ width: '100%' }} size={12}>
                     <Space wrap>
-                        <DatePicker.RangePicker onChange={(v) => { setPage(1); setDateRange(v as any) }} />
+                        <DatePicker.RangePicker
+                            placeholder={['开始日期', '结束日期']}
+                            onChange={(v) => { setPage(1); setDateRange(v as any) }}
+                        />
                         <Select
                             allowClear
-                            placeholder="engine"
+                            placeholder="分析引擎"
                             style={{ minWidth: 160 }}
                             options={[{ value: 'kimi-k2', label: 'kimi-k2' }, { value: 'heuristic', label: 'heuristic' }]}
                             value={engine}
@@ -541,7 +544,7 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                                 setStoredState('engine', v);
                             }}
                         />
-                        <Input placeholder="patch_id" style={{ width: 160 }} value={patchId} onChange={(e) => {
+                        <Input placeholder="补丁ID" style={{ width: 160 }} value={patchId} onChange={(e) => {
                             setPage(1);
                             setStoredState('page', 1);
                             setPatchId(e.target.value);
@@ -559,7 +562,16 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                             style={{ minWidth: 220 }}
                             value={visibleCols}
                             onChange={(v) => setVisibleCols(v as ColumnKey[])}
-                            options={allColumns.map(k => ({ label: k, value: k }))}
+                            options={allColumns.map(k => ({
+                                label: k === 'date' ? '日期' :
+                                    k === 'rel' ? '运行ID' :
+                                        k === 'patch' ? '补丁' :
+                                            k === 'total_anomalies' ? '异常数' :
+                                                k === 'engine' ? '引擎' :
+                                                    k === 'analysis_time' ? '分析时间' :
+                                                        k === 'actions' ? '操作' : k,
+                                value: k
+                            }))}
                         />
 
                         <Button onClick={async () => {
@@ -739,13 +751,14 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                             pageSize: runs.data?.page_size || pageSize,
                             total: runs.data?.total || 0,
                             showSizeChanger: true,
+                            showTotal: (total: number, range: [number, number]) => `第 ${range[0]}-${range[1]} 条，共 ${total} 条`,
                         }}
                         columns={[
-                            visibleCols.includes('date') && { title: 'date', dataIndex: 'date', sorter: true },
-                            visibleCols.includes('rel') && { title: 'rel', dataIndex: 'rel', render: (v: string) => <Button type="link" onClick={() => props.onOpenRun(v)}>{v.split('/').slice(-1)[0]}</Button> },
-                            visibleCols.includes('patch') && { title: 'patch', dataIndex: 'patch_id', sorter: true, render: (_: any, r: any) => `${r.patch_id || ''}/${r.patch_set || ''}` },
-                            visibleCols.includes('total_anomalies') && { title: 'anoms', dataIndex: 'total_anomalies', sorter: true },
-                            visibleCols.includes('engine') && { title: 'engine', render: (_: any, r: any) => <>{r.engine?.name}{r.engine?.degraded ? <Tag color="orange" style={{ marginLeft: 8 }}>降级</Tag> : null}</> },
+                            visibleCols.includes('date') && { title: '日期', dataIndex: 'date', sorter: true },
+                            visibleCols.includes('rel') && { title: '运行ID', dataIndex: 'rel', render: (v: string) => <Button type="link" onClick={() => props.onOpenRun(v)}>{v.split('/').slice(-1)[0]}</Button> },
+                            visibleCols.includes('patch') && { title: '补丁', dataIndex: 'patch_id', sorter: true, render: (_: any, r: any) => `${r.patch_id || ''}/${r.patch_set || ''}` },
+                            visibleCols.includes('total_anomalies') && { title: '异常数', dataIndex: 'total_anomalies', sorter: true },
+                            visibleCols.includes('engine') && { title: '引擎', render: (_: any, r: any) => <>{r.engine?.name}{r.engine?.degraded ? <Tag color="orange" style={{ marginLeft: 8 }}>降级</Tag> : null}</> },
                             visibleCols.includes('analysis_time') && {
                                 title: '分析时间',
                                 dataIndex: 'analysis_time',

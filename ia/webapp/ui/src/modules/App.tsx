@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { Layout, Menu, ConfigProvider, Dropdown, Button, Modal, Form, Input, InputNumber, message, Card, Tabs, Space, Tag, Divider } from 'antd'
+import zhCN from 'antd/locale/zh_CN'
 import { SettingOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons'
 import { Dashboard } from './Dashboard'
 import { RunDetail } from './RunDetail'
@@ -261,7 +262,10 @@ export function App() {
     }, [page, rel])
 
     return (
-        <ConfigProvider theme={{ token: { colorPrimary: '#1677ff' } }}>
+        <ConfigProvider
+            theme={{ token: { colorPrimary: '#1677ff' } }}
+            locale={zhCN}
+        >
             <Layout style={{ minHeight: '100vh' }}>
                 <Layout.Header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ color: '#fff', fontWeight: 600 }}>X Core 智能分析平台</div>
