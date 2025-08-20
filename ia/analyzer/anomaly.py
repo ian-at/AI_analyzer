@@ -119,6 +119,75 @@ def load_history_for_keys(
     return history
 
 
+def generate_check_suggestions(entry: dict[str, Any], robust_z: float | None, pct_change: float | None, pct_mean: float | None) -> list[str]:
+    """根据异常类型和统计特征生成具体的检查建议"""
+    suggestions = []
+
+    # 基础检查建议
+    base_checks = [
+        "检查 /proc/cpuinfo 确认CPU频率和核心配置",
+        "查看 /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor 检查频率调节策略",
+        "运行 htop 检查系统负载和进程状态"
+    ]
+
+    # 根据测试类型提供特定建议
+    metric = entry.get("metric", "").lower()
+    suite = entry.get("suite", "").lower()
+
+    if "dhrystone" in metric or "整数" in metric:
+        suggestions.extend([
+            "检查CPU缓存配置：cat /sys/devices/system/cpu/cpu*/cache/index*/size",
+            "确认编译器优化级别和指令集支持：gcc -march=native -Q --help=target"
+        ])
+    elif "whetstone" in metric or "浮点" in metric:
+        suggestions.extend([
+            "检查浮点单元状态：cat /proc/cpuinfo | grep -E '(fpu|vfp|neon)'",
+            "验证浮点运算优化：lscpu | grep -E '(Flags|Features)'"
+        ])
+    elif "copy" in metric or "io" in metric.lower():
+        suggestions.extend([
+            "检查内存带宽：cat /proc/meminfo | grep -E '(MemTotal|MemAvailable)'",
+            "确认存储I/O状态：iostat -x 1 3"
+        ])
+    elif "process" in metric or "进程" in metric:
+        suggestions.extend([
+            "检查进程调度策略：cat /proc/sys/kernel/sched_*",
+            "查看系统调用开销：strace -c -f -S time sleep 1"
+        ])
+    elif "syscall" in metric or "系统调用" in metric:
+        suggestions.extend([
+            "检查内核版本和配置：uname -a && cat /proc/version",
+            "查看系统调用表：cat /proc/kallsyms | grep sys_call_table"
+        ])
+
+    # 根据性能变化方向提供建议
+    if robust_z is not None and robust_z < -2:  # 性能下降
+        suggestions.extend([
+            "查看热限频告警：dmesg | grep -E '(thermal|throttle)'",
+            "检查是否进入节能模式：cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq",
+            "确认没有资源限制：cat /proc/cgroups && systemctl status"
+        ])
+    elif robust_z is not None and robust_z > 2:  # 性能提升
+        suggestions.extend([
+            "确认测试环境一致性：比较内核参数和编译选项",
+            "检查是否有性能优化配置变更：cat /proc/sys/kernel/perf_*"
+        ])
+
+    # 根据变化幅度提供建议
+    if pct_change is not None and abs(pct_change) > 0.5:  # 变化超过50%
+        suggestions.extend([
+            "检查硬件配置变更：lscpu && lshw -short",
+            "验证内核和驱动版本：modinfo $(lsmod | awk 'NR>1 {print $1}') | grep -E '(version|description)'"
+        ])
+
+    # 通用系统状态检查
+    suggestions.extend(base_checks[:2])  # 添加最重要的基础检查
+
+    # 去重并限制数量
+    unique_suggestions = list(dict.fromkeys(suggestions))  # 保持顺序去重
+    return unique_suggestions[:5]  # 最多返回5个建议
+
+
 def heuristic_anomalies(entries: list[dict[str, Any]], history: dict[tuple[str, str, str], list[float]]) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for e in entries:
@@ -161,7 +230,7 @@ def heuristic_anomalies(entries: list[dict[str, Any]], history: dict[tuple[str, 
                     "mean": mean(hist) if hist else None,
                     "median": median(hist) if hist else None,
                 },
-                "suggested_next_checks": [],
+                "suggested_next_checks": generate_check_suggestions(e, rz, pct, pct_mean),
             })
     return results
 

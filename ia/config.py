@@ -14,7 +14,13 @@ class ModelConfig:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.api_key and self.model)
+        # 支持本地模型：API_KEY为"EMPTY"时仍可启用（适用于本地Qwen等模型）
+        has_key = self.api_key and self.api_key.strip() and self.api_key.upper() != "EMPTY"
+        has_model = bool(self.model and self.model.strip())
+        has_base = bool(self.api_base and self.api_base.strip())
+
+        # 有API_KEY和模型名称，或者有本地API_BASE和模型名称（API_KEY为EMPTY）
+        return (has_key and has_model) or (not has_key and has_model and has_base)
 
 
 @dataclass

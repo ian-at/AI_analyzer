@@ -18,7 +18,14 @@ class K2ProviderAdapter:
         self._k2 = k2_client
 
     def name(self) -> str:
-        return "kimi-k2"
+        # 直接返回完整的模型名称
+        try:
+            model_name = getattr(self._k2.cfg, "model", None)
+            if model_name:
+                return model_name
+            return "ai-model"
+        except Exception:
+            return "ai-model"
 
     def version(self) -> str:
         try:

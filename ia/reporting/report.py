@@ -297,9 +297,37 @@ def _html_template(embed_json: str, title: str) -> str:
           `<div class=\"suggestion-item\">${s}</div>`
         ).join('');
 
-        const evidence = Array.isArray(a.supporting_evidence) ?
-          a.supporting_evidence.join('; ') :
-          (a.supporting_evidence || '');
+        // 处理支撑证据显示
+        let evidence = '';
+        if (a.supporting_evidence) {
+          if (typeof a.supporting_evidence === 'string') {
+            evidence = a.supporting_evidence;
+          } else if (Array.isArray(a.supporting_evidence)) {
+            evidence = a.supporting_evidence.join('; ');
+          } else if (typeof a.supporting_evidence === 'object') {
+            // 处理对象格式的支撑证据
+            const evidenceParts = [];
+            if (a.supporting_evidence.history_n !== undefined) {
+              evidenceParts.push(`历史样本数: ${a.supporting_evidence.history_n}`);
+            }
+            if (a.supporting_evidence.mean !== undefined && a.supporting_evidence.mean !== null) {
+              evidenceParts.push(`历史均值: ${a.supporting_evidence.mean.toFixed(2)}`);
+            }
+            if (a.supporting_evidence.median !== undefined && a.supporting_evidence.median !== null) {
+              evidenceParts.push(`历史中位数: ${a.supporting_evidence.median.toFixed(2)}`);
+            }
+            if (a.supporting_evidence.robust_z !== undefined && a.supporting_evidence.robust_z !== null) {
+              evidenceParts.push(`Robust Z-Score: ${a.supporting_evidence.robust_z.toFixed(2)}`);
+            }
+            if (a.supporting_evidence.pct_change_vs_median !== undefined && a.supporting_evidence.pct_change_vs_median !== null) {
+              evidenceParts.push(`vs中位数变化: ${(a.supporting_evidence.pct_change_vs_median * 100).toFixed(1)}%`);
+            }
+            if (a.supporting_evidence.pct_change_vs_mean !== undefined && a.supporting_evidence.pct_change_vs_mean !== null) {
+              evidenceParts.push(`vs均值变化: ${(a.supporting_evidence.pct_change_vs_mean * 100).toFixed(1)}%`);
+            }
+            evidence = evidenceParts.join('; ');
+          }
+        }
 
         // 构建更友好的标题
         let titleParts = [];

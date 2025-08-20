@@ -2,6 +2,32 @@
     "SOURCE_URL": "http://10.42.39.161/results/",
     "ARCHIVE_ROOT": "./archive",
     "DAYS": 3,
+    "_comment": "========== AI模型配置示例 ==========",
+    "_example_kimi": {
+        "comment": "Kimi K2模型配置",
+        "OPENAI_API_KEY": "sk-your-kimi-key",
+        "OPENAI_API_BASE": "https://api.moonshot.cn/v1",
+        "OPENAI_MODEL": "kimi-k2-0711-preview"
+    },
+    "_example_qwen_local": {
+        "comment": "本地Qwen模型配置（API_KEY设为EMPTY）",
+        "OPENAI_API_KEY": "EMPTY",
+        "OPENAI_API_BASE": "https://ai-proxy.kylinos.cn:11430/v1",
+        "OPENAI_MODEL": "qwen3-coder"
+    },
+    "_example_gpt": {
+        "comment": "OpenAI GPT模型配置",
+        "OPENAI_API_KEY": "sk-your-openai-key",
+        "OPENAI_API_BASE": "https://api.openai.com/v1",
+        "OPENAI_MODEL": "gpt-4o"
+    },
+    "_example_deepseek": {
+        "comment": "DeepSeek模型配置",
+        "OPENAI_API_KEY": "sk-your-deepseek-key",
+        "OPENAI_API_BASE": "https://api.deepseek.com",
+        "OPENAI_MODEL": "deepseek-coder"
+    },
+    "_current": "========== 当前使用的配置 ==========",
     "OPENAI_API_KEY": "sk-your-key",
     "OPENAI_API_BASE": "https://api.moonshot.cn/v1",
     "OPENAI_MODEL": "kimi-k2-0711-preview",
