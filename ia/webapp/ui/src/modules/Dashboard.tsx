@@ -286,27 +286,31 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                                 // 动态调整Y轴范围，突出波动
                                 min: (value: any) => {
                                     const values = (series.data?.series || []).map(p => p.value).filter(v => isFinite(v))
-                                    if (values.length === 0) return 'dataMin'
+                                    if (values.length === 0) return 0
                                     const minVal = Math.min(...values)
                                     const maxVal = Math.max(...values)
                                     const range = maxVal - minVal
                                     // 如果变化幅度很小，则扩大显示范围
-                                    if (range < maxVal * 0.1) {
-                                        return Math.max(0, minVal - maxVal * 0.05)
+                                    if (range < 1) {
+                                        const result = Math.max(0, minVal - 5)
+                                        return Math.round(result * 100) / 100  // 精确到小数点后2位
                                     }
-                                    return Math.max(0, minVal - range * 0.1)
+                                    const result = Math.max(0, minVal - range * 0.1)
+                                    return Math.round(result * 100) / 100  // 精确到小数点后2位
                                 },
                                 max: (value: any) => {
                                     const values = (series.data?.series || []).map(p => p.value).filter(v => isFinite(v))
-                                    if (values.length === 0) return 'dataMax'
+                                    if (values.length === 0) return 100
                                     const minVal = Math.min(...values)
                                     const maxVal = Math.max(...values)
                                     const range = maxVal - minVal
                                     // 如果变化幅度很小，则扩大显示范围
-                                    if (range < maxVal * 0.1) {
-                                        return maxVal + maxVal * 0.05
+                                    if (range < 1) {
+                                        const result = maxVal + 5
+                                        return Math.round(result * 100) / 100  // 精确到小数点后2位
                                     }
-                                    return maxVal + range * 0.1
+                                    const result = maxVal + range * 0.1
+                                    return Math.round(result * 100) / 100  // 精确到小数点后2位
                                 }
                             },
                             series: [{
@@ -473,19 +477,31 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                                 // 动态调整Y轴范围以突出箱线图
                                 min: (value: any) => {
                                     const arr = (series.data?.series || []).slice(-30).map(p => p.value).filter(v => isFinite(v)).sort((a, b) => a - b)
-                                    if (!arr.length) return 'dataMin'
+                                    if (!arr.length) return 0
                                     const min = arr[0]
                                     const max = arr[arr.length - 1]
                                     const range = max - min
-                                    return Math.max(0, min - range * 0.15)
+                                    // 如果变化幅度很小，使用固定偏移
+                                    if (range < 1) {
+                                        const result = Math.max(0, min - 2)
+                                        return Math.round(result * 100) / 100  // 精确到小数点后2位
+                                    }
+                                    const result = Math.max(0, min - range * 0.15)
+                                    return Math.round(result * 100) / 100  // 精确到小数点后2位
                                 },
                                 max: (value: any) => {
                                     const arr = (series.data?.series || []).slice(-30).map(p => p.value).filter(v => isFinite(v)).sort((a, b) => a - b)
-                                    if (!arr.length) return 'dataMax'
+                                    if (!arr.length) return 100
                                     const min = arr[0]
                                     const max = arr[arr.length - 1]
                                     const range = max - min
-                                    return max + range * 0.15
+                                    // 如果变化幅度很小，使用固定偏移
+                                    if (range < 1) {
+                                        const result = max + 2
+                                        return Math.round(result * 100) / 100  // 精确到小数点后2位
+                                    }
+                                    const result = max + range * 0.15
+                                    return Math.round(result * 100) / 100  // 精确到小数点后2位
                                 }
                             },
                             series: [{
