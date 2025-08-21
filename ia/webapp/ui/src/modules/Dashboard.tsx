@@ -57,6 +57,10 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
     const [currentJobId, setCurrentJobId] = useState<string | null>(null)
     const [selectedMetric, setSelectedMetric] = useState<string>('System Benchmarks Index Score')
 
+    // 数据获取相关状态
+    const [showCrawlModal, setShowCrawlModal] = useState(false)
+    const [crawlForm] = Form.useForm()
+
     const runsUrl = useMemo(() => {
         const params = new URLSearchParams()
         params.set('page', String(page))
@@ -218,16 +222,18 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
     }
 
     // 数据爬取
-    const crawlData = async (days: number = 7, force: boolean = false) => {
+    const startCrawlData = async (values: any) => {
+        setShowCrawlModal(false)
         try {
-            const r = await fetch(`/api/v1/actions/crawl-data?days=${days}&force=${force}`, { method: 'POST' })
+            const r = await fetch(`/api/v1/actions/crawl-data?days=${values.days}&force=${values.force}`, { method: 'POST' })
             const js: JobResp = await r.json()
             if (!r.ok) {
-                message.error((js as any)?.error || '启动数据爬取失败')
+                message.error((js as any)?.error || '启动数据获取失败')
                 return
             }
 
-            message.success(`已启动数据爬取任务: ${js.job_id}`)
+            const actionType = values.force ? '重新解析' : '获取'
+            message.success(`已启动数据${actionType}任务: ${js.job_id}`)
 
             // 简单的状态检查
             const checkCrawlProgress = async () => {
@@ -237,22 +243,22 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                         const jobStatus = await jr.json()
                         if (jobStatus.status === 'completed') {
                             const processed = jobStatus.result?.processed?.length || 0
-                            message.success(`数据爬取完成，处理了 ${processed} 个运行`)
+                            message.success(`数据${actionType}完成，处理了 ${processed} 个运行`)
                             runs.refetch()
                             analysisStatus.refetch()
                         } else if (jobStatus.status === 'failed') {
-                            message.error(`数据爬取失败: ${jobStatus.error || '未知错误'}`)
+                            message.error(`数据${actionType}失败: ${jobStatus.error || '未知错误'}`)
                         } else {
                             setTimeout(checkCrawlProgress, 3000)
                         }
                     }
                 } catch (e) {
-                    console.warn('检查爬取进度失败:', e)
+                    console.warn('检查进度失败:', e)
                 }
             }
             setTimeout(checkCrawlProgress, 2000)
         } catch (e) {
-            message.error('启动数据爬取失败：' + String(e))
+            message.error('启动数据操作失败：' + String(e))
         }
     }
 
@@ -726,8 +732,10 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                         }} disabled={analysisProgress.visible}>
                             {analysisProgress.visible ? '分析中...' : '智能分析'}
                         </Button>
-                        <Button onClick={() => crawlData(7, false)}>获取数据(7天)</Button>
-                        <Button onClick={() => crawlData(7, true)}>强制获取数据</Button>
+                        <Button onClick={() => {
+                            crawlForm.resetFields()
+                            setShowCrawlModal(true)
+                        }}>数据获取与解析</Button>
                         {analysisStatus.data?.last_analysis_time && (
                             <span style={{ fontSize: '12px', color: '#666' }}>
                                 最后分析: {new Date(analysisStatus.data.last_analysis_time).toLocaleString()}
@@ -954,8 +962,51 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                     </Form.Item>
                 </Form>
             </Modal>
+
+            {/* 数据管理模态框 */}
+            <Modal
+                title="数据获取与解析"
+                open={showCrawlModal}
+                onCancel={() => setShowCrawlModal(false)}
+                onOk={() => crawlForm.submit()}
+                width={500}
+            >
+                <Form
+                    form={crawlForm}
+                    layout="vertical"
+                    onFinish={startCrawlData}
+                    initialValues={{
+                        days: 7,
+                        force: false
+                    }}
+                >
+                    <Form.Item name="days" label="获取天数" rules={[{ required: true, message: '请输入天数' }]}>
+                        <InputNumber
+                            min={1}
+                            max={3650}
+                            placeholder="请输入要获取数据的天数"
+                            style={{ width: '100%' }}
+                            addonAfter="天"
+                        />
+                    </Form.Item>
+
+                    <Form.Item name="force" label="处理模式" rules={[{ required: true }]}>
+                        <Select placeholder="选择处理模式">
+                            <Select.Option value={false}>增量获取（跳过已解析数据）</Select.Option>
+                            <Select.Option value={true}>强制重新解析（覆盖现有数据）</Select.Option>
+                        </Select>
+                    </Form.Item>
+
+                    <div style={{ color: '#666', fontSize: '12px', marginTop: 16 }}>
+                        <div>💡 <strong>增量获取</strong>：仅处理尚未解析的数据，节省时间</div>
+                        <div>⚠️ <strong>强制重新解析</strong>：重新处理所有数据，覆盖现有结果</div>
+                        <div style={{ marginTop: 8 }}>
+                            <strong>建议天数：</strong>
+                            <span style={{ marginLeft: 8 }}>日常更新: 7天 | 补齐数据: 30-90天 | 完整历史: 365天+</span>
+                        </div>
+                    </div>
+                </Form>
+            </Modal>
         </Space>
     )
 }
-
-
