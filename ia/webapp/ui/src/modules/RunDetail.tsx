@@ -107,7 +107,7 @@ export function RunDetail(props: { rel: string, onBack: () => void }) {
                     <div>
                         {(data?.anomalies || []).length ? (
                             <>
-                                <div style={{ marginBottom: 8 }}>以下为 K2/启发式识别出的异常摘要与根因建议（详细可点击 HTML 报告查看富文本排版）：</div>
+                                <div style={{ marginBottom: 8 }}>以下为 AI大模型/启发式算法识别出的异常摘要与根因建议（详细可点击 HTML 报告查看富文本排版）：</div>
                             </>
                         ) : '暂无异常摘要（可点击上方“分析/重新分析”后刷新）'}
                     </div>
@@ -119,7 +119,6 @@ export function RunDetail(props: { rel: string, onBack: () => void }) {
                         showSizeChanger: true,
                     }} columns={[
                         { title: '测试套件', dataIndex: 'suite' },
-                        { title: '测试用例', dataIndex: 'case' },
                         { title: '指标', dataIndex: 'metric' },
                         { title: '当前值', dataIndex: 'current_value' },
                         { title: '严重程度', dataIndex: 'severity' },
