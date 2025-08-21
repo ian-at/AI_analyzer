@@ -912,8 +912,8 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
 
                     <Form.Item name="engine" label="分析引擎">
                         <Select>
-                            <Select.Option value="auto">自动选择 (K2优先，降级到启发式)</Select.Option>
-                            <Select.Option value="k2">K2 AI引擎 (仅K2)</Select.Option>
+                            <Select.Option value="auto">自动选择 (AI大模型优先，降级到启发式)</Select.Option>
+                            <Select.Option value="k2">AI大模型引擎 (仅AI分析)</Select.Option>
                             <Select.Option value="heuristic">启发式引擎 (无AI)</Select.Option>
                         </Select>
                     </Form.Item>
@@ -951,8 +951,8 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
 
                                         <Form.Item name="patchIds" label="指定Patch ID (可选)">
                                             <Input.TextArea
-                                                placeholder="逗号分隔的patch_id列表，例如: abc123,def456"
-                                                rows={2}
+                                                placeholder="支持两种格式：1) 只填patch_id (如: 2401,2361) 会分析该patch的所有版本；2) 填完整格式 (如: 2401/1,2361/2) 精确匹配特定版本"
+                                                rows={3}
                                             />
                                         </Form.Item>
                                     </>

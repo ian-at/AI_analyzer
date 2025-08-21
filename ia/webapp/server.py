@@ -487,12 +487,29 @@ def action_reanalyze_custom(
                 if end_date and run_date > end_date:
                     continue
 
-            # patch_id过滤
+            # patch_id过滤 - 支持两种格式：patch_id 或 patch_id/patch_set
             if patch_ids:
                 target_patches = [p.strip()
                                   for p in patch_ids.split(",") if p.strip()]
-                run_patch = run.get("patch_id", "")
-                if run_patch not in target_patches:
+                run_patch_id = run.get("patch_id", "")
+                run_patch_set = run.get("patch_set", "")
+                run_full_patch = f"{run_patch_id}/{run_patch_set}" if run_patch_id and run_patch_set else run_patch_id
+
+                # 检查是否匹配任何目标patch
+                match_found = False
+                for target_patch in target_patches:
+                    if "/" in target_patch:
+                        # 完整格式匹配：patch_id/patch_set
+                        if run_full_patch == target_patch:
+                            match_found = True
+                            break
+                    else:
+                        # 只匹配patch_id
+                        if run_patch_id == target_patch:
+                            match_found = True
+                            break
+
+                if not match_found:
                     continue
 
             filtered_runs.append(run)
