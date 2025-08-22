@@ -82,6 +82,70 @@ export function App() {
     // 启用滚动位置恢复
     useScrollRestore()
 
+    // 同步标识，防止无限循环
+    const [isSyncing, setIsSyncing] = useState(false)
+
+    // 配置同步函数
+    const syncConfigValues = React.useCallback((changedFields: any[], allFields: any[]) => {
+        if (isSyncing) return
+
+        setIsSyncing(true)
+
+        try {
+            // 提示词表单的阈值字段变化，同步到检测阈值表单
+            if (changedFields.length > 0) {
+                const promptValues = promptForm.getFieldsValue()
+                const thresholdValues = thresholdForm.getFieldsValue()
+
+                changedFields.forEach(field => {
+                    if (field.name?.[0] === 'robust_z_threshold' && field.value) {
+                        thresholdForm.setFieldValue('robust_z_threshold', parseFloat(field.value))
+                    }
+
+                    // 当median_threshold或mean_threshold变化时，计算并同步到pct_change_threshold
+                    if ((field.name?.[0] === 'median_threshold' || field.name?.[0] === 'mean_threshold') && field.value) {
+                        const medianThreshold = parseFloat(promptValues.median_threshold) || 0
+                        const meanThreshold = parseFloat(promptValues.mean_threshold) || 0
+
+                        if (medianThreshold > 0 || meanThreshold > 0) {
+                            const avgThreshold = medianThreshold > 0 && meanThreshold > 0
+                                ? (medianThreshold + meanThreshold) / 200  // 转换为0-1范围
+                                : (medianThreshold || meanThreshold) / 100  // 转换为0-1范围
+
+                            thresholdForm.setFieldValue('pct_change_threshold',
+                                Math.min(1, Math.max(0.01, Number(avgThreshold.toFixed(2)))))
+                        }
+                    }
+                })
+            }
+        } finally {
+            setTimeout(() => setIsSyncing(false), 100)
+        }
+    }, [promptForm, thresholdForm, isSyncing])
+
+    // 检测阈值变化时同步到提示词配置
+    const syncThresholdToPrompt = React.useCallback((changedFields: any[], allFields: any[]) => {
+        if (isSyncing) return
+
+        setIsSyncing(true)
+
+        try {
+            changedFields.forEach(field => {
+                if (field.name?.[0] === 'robust_z_threshold' && field.value) {
+                    promptForm.setFieldValue('robust_z_threshold', field.value.toString())
+                }
+
+                if (field.name?.[0] === 'pct_change_threshold' && field.value) {
+                    const pctAsPercent = Number((field.value * 100).toFixed(1))  // 转换为百分比
+                    promptForm.setFieldValue('median_threshold', pctAsPercent.toString())
+                    promptForm.setFieldValue('mean_threshold', pctAsPercent.toString())
+                }
+            })
+        } finally {
+            setTimeout(() => setIsSyncing(false), 100)
+        }
+    }, [promptForm, thresholdForm, isSyncing])
+
     // 解析提示词为结构化配置项
     const parsePromptToStructure = (prompt: string) => {
         const structuredConfig = [
@@ -208,10 +272,21 @@ export function App() {
                 formValues[item.key] = item.value
             })
 
+            // 同步阈值配置：优先使用后端返回的thresholdData，其次使用提示词中解析的值
+            const robustZThreshold = thresholdData.robust_z_threshold || parseFloat(formValues.robust_z_threshold) || 3.0
+            const pctChangeThreshold = thresholdData.pct_change_threshold ||
+                (parseFloat(formValues.median_threshold) || parseFloat(formValues.mean_threshold) || 30) / 100
+
+            // 确保提示词配置中的阈值与检测阈值配置保持一致
+            formValues.robust_z_threshold = robustZThreshold.toString()
+            const pctAsPercent = (pctChangeThreshold * 100).toFixed(1)
+            formValues.median_threshold = pctAsPercent
+            formValues.mean_threshold = pctAsPercent
+
             promptForm.setFieldsValue(formValues)
             thresholdForm.setFieldsValue({
-                robust_z_threshold: thresholdData.robust_z_threshold,
-                pct_change_threshold: thresholdData.pct_change_threshold
+                robust_z_threshold: robustZThreshold,
+                pct_change_threshold: pctChangeThreshold
             })
             setConfigModalVisible(true)
         } catch (e) {
@@ -298,7 +373,11 @@ export function App() {
                                 key: 'prompt',
                                 label: '提示词配置',
                                 children: (
-                                    <Form form={promptForm} layout="vertical">
+                                    <Form
+                                        form={promptForm}
+                                        layout="vertical"
+                                        onFieldsChange={syncConfigValues}
+                                    >
                                         <div style={{ marginBottom: 16 }}>
                                             <div style={{ marginBottom: 12 }}>
                                                 <span style={{ fontWeight: 600 }}>结构化配置</span>
@@ -362,7 +441,11 @@ export function App() {
                                 key: 'thresholds',
                                 label: '检测阈值',
                                 children: (
-                                    <Form form={thresholdForm} layout="vertical">
+                                    <Form
+                                        form={thresholdForm}
+                                        layout="vertical"
+                                        onFieldsChange={syncThresholdToPrompt}
+                                    >
                                         <Card title="异常检测阈值" size="small">
                                             <div style={{ display: 'flex', gap: 24 }}>
                                                 <Form.Item
@@ -405,12 +488,12 @@ export function App() {
                                         <Card title="测试指标说明" size="small" style={{ marginTop: 16 }}>
                                             <div style={{ fontSize: '12px', color: '#666' }}>
                                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px' }}>
-                                                    <div><Tag size="small">综合评分</Tag> System Benchmarks Index Score</div>
-                                                    <div><Tag size="small">整数运算</Tag> Dhrystone 2 (lps)</div>
-                                                    <div><Tag size="small">浮点运算</Tag> Double-Precision Whetstone (MWIPS)</div>
-                                                    <div><Tag size="small">I/O性能</Tag> File Copy (KBps)</div>
-                                                    <div><Tag size="small">进程创建</Tag> Process Creation (lps)</div>
-                                                    <div><Tag size="small">系统调用</Tag> System Call Overhead (lps)</div>
+                                                    <div><Tag>综合评分</Tag> System Benchmarks Index Score</div>
+                                                    <div><Tag>整数运算</Tag> Dhrystone 2 (lps)</div>
+                                                    <div><Tag>浮点运算</Tag> Double-Precision Whetstone (MWIPS)</div>
+                                                    <div><Tag>I/O性能</Tag> File Copy (KBps)</div>
+                                                    <div><Tag>进程创建</Tag> Process Creation (lps)</div>
+                                                    <div><Tag>系统调用</Tag> System Call Overhead (lps)</div>
                                                 </div>
                                             </div>
                                         </Card>
