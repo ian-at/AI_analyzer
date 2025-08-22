@@ -45,9 +45,11 @@ def collect_runs(archive_root: str, start: Optional[str], end: Optional[str]) ->
                     os.path.join(run_dir, "anomalies.k2.jsonl")) else []
                 ub = read_jsonl(os.path.join(run_dir, "ub.jsonl")) if os.path.exists(
                     os.path.join(run_dir, "ub.jsonl")) else []
+                rel_path = os.path.relpath(run_dir, start=archive_root)
                 runs.append({
                     "run_dir": run_dir,
-                    "rel_dir": os.path.relpath(run_dir, start=archive_root),
+                    "rel_dir": rel_path,
+                    "rel": rel_path,  # 添加rel字段用于向后兼容
                     "date": date_str,
                     "patch_id": meta.get("patch_id"),
                     "patch_set": meta.get("patch_set"),
@@ -86,9 +88,11 @@ def collect_runs(archive_root: str, start: Optional[str], end: Optional[str]) ->
                         os.path.join(run_dir, "anomalies.k2.jsonl")) else []
                     ub = read_jsonl(os.path.join(run_dir, "ub.jsonl")) if os.path.exists(
                         os.path.join(run_dir, "ub.jsonl")) else []
+                    rel_path = os.path.relpath(run_dir, start=archive_root)
                     runs.append({
                         "run_dir": run_dir,
-                        "rel_dir": os.path.relpath(run_dir, start=archive_root),
+                        "rel_dir": rel_path,
+                        "rel": rel_path,  # 添加rel字段用于向后兼容
                         "date": d,
                         "patch_id": meta.get("patch_id"),
                         "patch_set": meta.get("patch_set"),
