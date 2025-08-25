@@ -75,9 +75,9 @@ PROMPT_SYSTEM = (
     "任务：识别『真正异常』的指标，并给出最可能的根因和具体的后续检查建议。\n"
     "准则：\n"
     "- 波动性：UB 数据存在天然波动，请优先依据稳健统计特征（robust_z、与历史中位数/均值的百分比变化、history_n）。\n"
-    "- 阈值建议：abs(robust_z)≥3 或 |Δ vs median|≥30% 或 |Δ vs mean|≥30% 时可以判为异常；边界情况应谨慎，证据不足时判为非异常。\n"
+    "- 阈值建议：使用AND逻辑进行严格判断，必须同时满足统计偏离和性能变化两个条件。分级阈值：高严重度(abs(robust_z)≥8.0 且 |Δ vs median|≥50%)、中等严重度(abs(robust_z)≥6.0 且 |Δ vs median|≥35%)、低严重度(abs(robust_z)≥4.0 且 |Δ vs median|≥25%)；历史样本数必须≥20才进行异常判断；边界情况应谨慎，证据不足时判为非异常。\n"
     "- 方向性：明确说明异常是『性能下降』还是『性能提升』，并用当前值与历史对比定量描述。\n"
-    "- 根因与证据：每个异常必须给出 primary_reason 与至少一个 root_cause（含 likelihood 0~1），并在 supporting_evidence 中引用具体特征（如历史样本数、robust_z、Δ% 等）。\n"
+    "- 根因与证据：每个异常必须给出 primary_reason 与至少一个 root_cause（含 likelihood 0~1），并在 supporting_evidence 中引用具体特征（如历史样本数、robust_z、pct_change_vs_median 等）。\n"
     "- 后续建议：每个异常必须在 suggested_next_checks 中提供3-5个具体可执行的检查建议，例如：『检查 /proc/cpuinfo 确认CPU频率设置』、『查看 /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor』、『运行 htop 检查系统负载』、『检查内核日志中的热限频告警』、『验证cgroup限制配置』等。\n"
     "- 置信度：每个异常项必须包含 confidence 字段（0~1之间的数值），不可为null或省略，基于统计证据强度评估。\n"
     "- 环境：目标平台为 ARM64，Linux 内核 pKVM 场景（EL1/EL2）。常见影响因素包括：CPU 频率/能效策略（cpufreq governor: performance/powersave/schedutil）、热限频、big.LITTLE 调度失衡、中断亲和与 IRQ 绑核、cgroup/cpuset/rt 限制、隔离核/IRQ 亲和（isolcpus/nohz_full）、虚拟化开销（EL2 trap/PMU 虚拟化/阶段页表）、页大小/THP、缓存/内存带宽与 NUMA（若存在）、编译器优化与链接方式、二进制是否被重新编译、内核/固件配置变更等。\n"
@@ -149,7 +149,7 @@ class K2Client:
                 "必须包含 root_causes 数组，每个根因包含 cause 和 likelihood 字段；"
                 "必须包含 suggested_next_checks 数组，每个异常至少提供3-5个具体可执行的检查命令或步骤；"
                 "suggested_next_checks 示例：『检查 /proc/cpuinfo 确认CPU频率』、『运行 cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor』、『使用 htop 检查系统负载』、『查看 dmesg | grep -i thermal 检查热限频』、『检查 /proc/cgroups 确认资源限制』等；"
-                "结合 features（如 robust_z、pct_change_vs_median、pct_change_vs_mean、mean、median、history_n、current_value）给出根因与证据引用；"
+                "结合 features（如 robust_z、pct_change_vs_median、mean、median、history_n、current_value）给出根因与证据引用；"
                 "若证据不足，请不要硬判异常；所有自然语言字段必须使用中文；结合 ARM64 与 pKVM 场景优先给出相关根因，避免 x86 专属术语。"
             ),
         }
