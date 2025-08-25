@@ -104,6 +104,8 @@ def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_exis
     history = load_history_for_keys(archive_root, keys)
 
     anomalies: list[dict[str, Any]] = []
+    ai_analysis_failed = False  # 移到函数顶层，确保作用域正确
+
     # 若已有 K2 结果且非空，直接复用，避免重复调用
     existing = read_jsonl(os.path.join(run_dir, "anomalies.k2.jsonl"))
     if reuse_existing and existing:
@@ -139,15 +141,25 @@ def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_exis
             # 降低并发：组与组之间小睡，降低触发限频的概率
             import time
             time.sleep(2.0)
-            result = provider.analyze(
-                run_id=os.path.basename(run_dir),
-                group_id=str(gid),
-                entries=[{**e, "features": features.get("::".join(
-                    [e.get("suite", ""), e.get("case", ""), e.get("metric", "")]))} for e in ents],
-                history=hist_map,
-            )
-            anomalies.extend(_normalize_k2_anomalies(
-                result.get("anomalies", [])))
+            try:
+                result = provider.analyze(
+                    run_id=os.path.basename(run_dir),
+                    group_id=str(gid),
+                    entries=[{**e, "features": features.get("::".join(
+                        [e.get("suite", ""), e.get("case", ""), e.get("metric", "")]))} for e in ents],
+                    history=hist_map,
+                )
+                anomalies.extend(_normalize_k2_anomalies(
+                    result.get("anomalies", [])))
+            except Exception as e:
+                print(f"AI分析失败 (组 {gid}): {e}")
+                ai_analysis_failed = True
+                break  # 如果AI分析失败，跳出循环，使用启发式算法
+
+        # 如果AI分析失败，fallback到启发式算法
+        if ai_analysis_failed:
+            print("AI分析失败，fallback到启发式算法")
+            anomalies = heuristic_anomalies(entries, history)
     else:
         anomalies = heuristic_anomalies(entries, history)
 
@@ -156,10 +168,17 @@ def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_exis
     summ = summarize(anomalies)
     # 写入分析引擎元数据，便于前端展示/筛选
     enabled = bool(provider and provider.enabled())
+    # 如果AI失败并fallback到启发式算法，标记为降级模式
+    actual_degraded = (not enabled) or ai_analysis_failed
+    actual_engine = "heuristic" if actual_degraded else (
+        provider.name() if enabled else "heuristic")
+    actual_version = "n/a" if actual_degraded else (
+        provider.version() if enabled else "n/a")
+
     summ["analysis_engine"] = {
-        "name": (provider.name() if enabled else "heuristic"),
-        "version": (provider.version() if enabled else "n/a"),
-        "degraded": (not enabled),
+        "name": actual_engine,
+        "version": actual_version,
+        "degraded": actual_degraded,
     }
     # 写入分析时间（UTC）
     summ["analysis_time"] = datetime.utcnow().isoformat() + "Z"
