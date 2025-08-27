@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import threading
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Query, Request
@@ -18,6 +18,8 @@ from ..analyzer.progress_tracker import get_tracker
 from ..orchestrator.pipeline import reanalyze_missing
 from ..interfaces.http_utils import json_with_cache
 from ..domain.models import DefectAnnotation
+from ..webhook.handlers import WebhookHandler
+from ..webhook.models import SimplifiedWebhookResponse
 
 
 app = FastAPI(title="IA Service")
@@ -967,3 +969,122 @@ async def update_threshold_config(request: Request):
             pass
 
     return {"success": True, "message": "阈值已更新（重启后重置）"}
+
+
+# ============= Webhook API端点 =============
+
+@app.post("/api/v1/webhook/analyze-patch", response_model=SimplifiedWebhookResponse)
+async def webhook_analyze_patch(
+    patch_id: str = Query(..., description="补丁ID"),
+    patch_set: str = Query(..., description="补丁集"),
+    force_refetch: bool = Query(False, description="是否强制重新获取"),
+    force_reanalyze: bool = Query(True, description="是否强制重新分析"),
+    max_search_days: int = Query(7, description="最大搜索天数")
+):
+    """
+    简化的Webhook接口 - 根据patch_id和patch_set获取并分析数据
+    支持GET和POST方法
+    """
+    # 创建处理器
+    handler = WebhookHandler(archive_root=ARCHIVE_ROOT)
+
+    # 生成任务ID
+    job_id = uuid.uuid4().hex[:12]
+
+    # 先获取模型信息
+    engine, model = handler.get_model_info()
+    patch_str = f"{patch_id}/{patch_set}"
+
+    # 首先快速检查数据是否存在
+    found, date_str, run_dir = handler.search_patch_data(
+        patch_id, patch_set, max_search_days)
+
+    if not found:
+        # 数据不存在，直接返回失败
+        return SimplifiedWebhookResponse(
+            success=False,
+            patch=patch_str,
+            message=f"未找到 patch {patch_str} 的UB数据（搜索了最近{max_search_days}天）",
+            engine=engine,
+            ai_model_configured=model,
+            force_refetch=force_refetch,
+            force_reanalyze=force_reanalyze,
+            max_search_days=max_search_days,
+            error=f"No data found for patch {patch_str}"
+        )
+
+    # 数据存在，启动异步处理
+    def _async_process():
+        with _jobs_lock:
+            _jobs[job_id] = {"status": "running",
+                             "progress": 10, "message": "开始处理"}
+        try:
+            # 执行完整的处理流程
+            result = handler.process_webhook_simplified(
+                patch_id=patch_id,
+                patch_set=patch_set,
+                force_refetch=force_refetch,
+                force_reanalyze=force_reanalyze,
+                max_search_days=max_search_days,
+                job_id=job_id
+            )
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "completed",
+                    "result": result.dict(),
+                    "progress": 100,
+                    "message": "处理完成"
+                }
+            return result
+        except Exception as e:
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "failed",
+                    "error": str(e),
+                    "progress": 0,
+                    "message": f"处理失败: {str(e)}"
+                }
+            raise
+
+    # 启动异步任务，不等待
+    _pool.submit(_async_process)
+
+    # 立即返回成功响应（因为已确认数据存在）
+    return SimplifiedWebhookResponse(
+        success=True,
+        job_id=job_id,
+        patch=patch_str,
+        message=f"已开始获取和分析 patch {patch_str}，请使用 job_id 查询进度",
+        engine=engine,
+        ai_model_configured=model,
+        force_refetch=force_refetch,
+        force_reanalyze=force_reanalyze,
+        max_search_days=max_search_days,
+        status_url=f"/api/v1/jobs/{job_id}",
+        estimated_time="正在分析，请稍后查询",
+        process_flow=[
+            "1. 检查本地是否有数据",
+            "2. 如需要，从远程获取UB数据",
+            "3. 解析HTML生成ub.jsonl",
+            f"4. 执行AI异常分析（使用config.json配置的模型: {model}）",
+            "5. 生成分析报告"
+        ]
+    )
+
+# 支持GET方法
+@app.get("/api/v1/webhook/analyze-patch", response_model=SimplifiedWebhookResponse)
+async def webhook_analyze_patch_get(
+    patch_id: str = Query(..., description="补丁ID"),
+    patch_set: str = Query(..., description="补丁集"),
+    force_refetch: bool = Query(False, description="是否强制重新获取"),
+    force_reanalyze: bool = Query(True, description="是否强制重新分析"),
+    max_search_days: int = Query(7, description="最大搜索天数")
+):
+    """GET方法的webhook接口"""
+    return await webhook_analyze_patch(
+        patch_id=patch_id,
+        patch_set=patch_set,
+        force_refetch=force_refetch,
+        force_reanalyze=force_reanalyze,
+        max_search_days=max_search_days
+    )

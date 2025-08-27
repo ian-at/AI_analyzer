@@ -78,20 +78,33 @@ def crawl_incremental(base_url: str, archive_root: str, days: int = 7) -> list[s
             }
             write_json(os.path.join(run_dir, "meta.json"), meta)
 
-            # indexes
-            append_jsonl(day_index_path, {
-                "run_dir": run_dir,
-                "patch_id": item.patch_id,
-                "patch_set": item.patch_set,
-                "name": item.name,
-                "md5": md5,
-            })
-            append_jsonl(os.path.join(archive_root, "runs_index.jsonl"), {
-                "run_dir": run_dir,
-                "date": date_str,
-                "patch_id": item.patch_id,
-                "patch_set": item.patch_set,
-            })
+            # indexes - 写入前检查是否已存在，避免重复
+            # 检查runs_index.jsonl中是否已有该记录
+            runs_index_path = os.path.join(archive_root, "runs_index.jsonl")
+            existing_runs = read_jsonl(runs_index_path) if os.path.exists(
+                runs_index_path) else []
+            already_exists = any(
+                r.get("patch_id") == item.patch_id and
+                r.get("patch_set") == item.patch_set and
+                r.get("date") == date_str
+                for r in existing_runs
+            )
+
+            if not already_exists:
+                # 只有不存在时才写入索引
+                append_jsonl(day_index_path, {
+                    "run_dir": run_dir,
+                    "patch_id": item.patch_id,
+                    "patch_set": item.patch_set,
+                    "name": item.name,
+                    "md5": md5,
+                })
+                append_jsonl(runs_index_path, {
+                    "run_dir": run_dir,
+                    "date": date_str,
+                    "patch_id": item.patch_id,
+                    "patch_set": item.patch_set,
+                })
             new_runs.append(run_dir)
 
     return new_runs
