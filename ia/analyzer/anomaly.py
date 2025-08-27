@@ -68,6 +68,7 @@ def load_history_for_keys(
     archive_root: str,
     keys: list[tuple[str, str, str]],
     max_runs: int = None,
+    min_samples: int = 10,  # 可配置的最小样本数
 ) -> dict[tuple[str, str, str], list[float]]:
     """扫描归档中的历史 run，为每个 (suite, case, metric) 构建数值历史数组。
 
@@ -104,7 +105,7 @@ def load_history_for_keys(
                                 ) // len(total_counts) if total_counts else 30
             max_available = max(total_counts.values()) if total_counts else 30
             # 使用所有可用数据，不设置上限，确保基线越来越准确
-            max_runs = max(10, max_available)
+            max_runs = max(min_samples, max_available)
             print(
                 f"使用所有历史数据: 平均可用数据{avg_available}个, 最大可用数据{max_available}个, 将使用{max_runs}个样本")
         else:
@@ -199,14 +200,21 @@ def generate_check_suggestions(entry: dict[str, Any], robust_z: float | None, pc
     return unique_suggestions[:5]  # 最多返回5个建议
 
 
-def heuristic_anomalies(entries: list[dict[str, Any]], history: dict[tuple[str, str, str], list[float]]) -> list[dict[str, Any]]:
+def heuristic_anomalies(entries: list[dict[str, Any]], history: dict[tuple[str, str, str], list[float]], min_samples_for_anomaly: int = 10) -> list[dict[str, Any]]:
+    """启发式异常检测
+
+    Args:
+        entries: 当前运行的数据条目
+        history: 历史数据
+        min_samples_for_anomaly: 异常检测所需的最小样本数，默认10
+    """
     results: list[dict[str, Any]] = []
     for e in entries:
         key = (e.get("suite", ""), e.get("case", ""), e.get("metric", ""))
         hist = history.get(key, [])
 
-        # 样本数要求：历史样本数必须>=20才进行异常判断
-        if len(hist) < 20:
+        # 样本数要求：历史样本数必须>=min_samples_for_anomaly才进行异常判断
+        if len(hist) < min_samples_for_anomaly:
             continue
 
         current = float(e.get("value"))

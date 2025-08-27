@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 import json
+from typing import Optional, Dict, Any
 
 
 @dataclass
@@ -140,3 +141,48 @@ def load_env_config(
         days=days,
         model=model_cfg,
     )
+
+
+def load_analysis_config() -> Dict[str, Any]:
+    """加载分析配置
+
+    Returns:
+        分析配置字典，包含异常检测阈值等参数
+    """
+    # 尝试从多个位置加载配置文件
+    config_paths = [
+        "analysis_config.json",
+        "./analysis_config.json",
+        os.path.join(".", "analysis_config.json"),
+    ]
+
+    for config_path in config_paths:
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"警告：无法加载分析配置文件 {config_path}: {e}")
+
+    # 返回默认配置
+    return {
+        "anomaly_detection": {
+            "min_samples_for_anomaly": 10,
+            "min_samples_for_history": 10,
+            "robust_z_thresholds": {
+                "high": 8.0,
+                "medium": 6.0,
+                "low": 4.0
+            },
+            "pct_change_thresholds": {
+                "high": 50,
+                "medium": 35,
+                "low": 25
+            }
+        },
+        "ai_analysis": {
+            "enable_batch_optimization": True,
+            "max_batch_size": 10,
+            "enable_cache": True
+        }
+    }

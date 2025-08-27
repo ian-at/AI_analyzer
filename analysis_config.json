@@ -1,0 +1,25 @@
+{
+    "analysis": {
+        "min_samples_for_analysis": 10,
+        "min_samples_for_anomaly_detection": 10,
+        "robust_z_threshold": 4.0,
+        "pct_change_threshold": 0.25
+    },
+    "thresholds": {
+        "high": {
+            "robust_z": 8.0,
+            "pct_change": 0.50,
+            "min_samples": 10
+        },
+        "medium": {
+            "robust_z": 6.0,
+            "pct_change": 0.35,
+            "min_samples": 10
+        },
+        "low": {
+            "robust_z": 4.0,
+            "pct_change": 0.25,
+            "min_samples": 10
+        }
+    }
+}

@@ -1,44 +1,119 @@
 {
-    "models": [
-        {
-            "name": "model-1",
-            "api_base": "https://your-api-endpoint.com/v1",
-            "api_key": "your-api-key-here",
-            "model": "your-model-name",
-            "enabled": true,
-            "priority": 1,
-            "timeout": 120,
-            "max_retries": 3
-        },
-        {
-            "name": "model-2",
-            "api_base": "https://another-api-endpoint.com/v1",
-            "api_key": "another-api-key",
-            "model": "another-model-name",
-            "enabled": true,
-            "priority": 2,
-            "timeout": 120,
-            "max_retries": 3
-        }
-    ],
-    "default_model": "model-1",
+    "// 数据源配置": "UB测试数据的远程HTTP服务器地址",
+    "SOURCE_URL": "http://10.42.30.103/results/UnixBenchTest/",
+    "// 本地存储配置": "数据存档的本地目录",
+    "ARCHIVE_ROOT": "./archive",
+    "// 数据获取配置": "获取最近多少天的数据",
+    "DAYS": 7,
+    "// 批量优化配置": "AI分析的批量优化设置",
     "batch_optimization": {
         "enabled": true,
         "max_batch_size": 10,
-        "min_batch_size": 3
+        "cache_enabled": true
     },
-    "cache": {
-        "enabled": true,
-        "ttl_hours": 24,
-        "directory": "./cache"
+    "// AI模型配置": "支持多模型配置，按顺序尝试，直到找到可用模型",
+    "models": [
+        {
+            "// Claude 3.5 Sonnet示例": "通过API代理访问Claude",
+            "name": "claude-3-5-sonnet",
+            "enabled": true,
+            "api_key": "sk-your-api-key-here",
+            "api_base": "https://api.anthropic.com/v1",
+            "model": "claude-3-5-sonnet-20241022",
+            "verify_ssl": true,
+            "headers": {
+                "anthropic-version": "2023-06-01"
+            }
+        },
+        {
+            "// GPT-4o示例": "OpenAI GPT-4o模型",
+            "name": "gpt-4o",
+            "enabled": false,
+            "api_key": "sk-your-openai-key",
+            "api_base": "https://api.openai.com/v1",
+            "model": "gpt-4o",
+            "verify_ssl": true
+        },
+        {
+            "// 通义千问示例": "阿里云通义千问模型",
+            "name": "qwen-max",
+            "enabled": false,
+            "api_key": "sk-your-dashscope-key",
+            "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "model": "qwen-max",
+            "verify_ssl": true
+        },
+        {
+            "// DeepSeek示例": "DeepSeek V3模型，性价比极高",
+            "name": "deepseek-v3",
+            "enabled": false,
+            "api_key": "sk-your-deepseek-key",
+            "api_base": "https://api.deepseek.com/v1",
+            "model": "deepseek-chat",
+            "verify_ssl": true
+        },
+        {
+            "// Gemini示例": "Google Gemini模型",
+            "name": "gemini-2.0-flash",
+            "enabled": false,
+            "api_key": "your-google-api-key",
+            "api_base": "https://generativelanguage.googleapis.com/v1beta",
+            "model": "gemini-2.0-flash-exp",
+            "verify_ssl": true
+        },
+        {
+            "// 本地Ollama示例": "使用Ollama部署的本地模型",
+            "name": "ollama-qwen",
+            "enabled": false,
+            "api_key": "EMPTY",
+            "api_base": "http://localhost:11434/v1",
+            "model": "qwen2.5:32b",
+            "verify_ssl": false
+        },
+        {
+            "// 本地vLLM示例": "使用vLLM部署的本地模型",
+            "name": "vllm-llama",
+            "enabled": false,
+            "api_key": "EMPTY",
+            "api_base": "http://localhost:8000/v1",
+            "model": "meta-llama/Llama-3.3-70B-Instruct",
+            "verify_ssl": false
+        },
+        {
+            "// Kimi示例": "月之暗面Kimi模型",
+            "name": "kimi-k2",
+            "enabled": false,
+            "api_key": "sk-your-kimi-key",
+            "api_base": "https://api.moonshot.cn/v1",
+            "model": "moonshot-v1-32k",
+            "verify_ssl": true
+        }
+    ],
+    "// 启发式分析配置": "当AI不可用时使用的启发式算法",
+    "heuristic": {
+        "// 说明": "启发式算法始终可用，作为AI分析的降级方案",
+        "always_available": true,
+        "description": "基于统计阈值的异常检测算法"
     },
-    "performance": {
-        "concurrent_requests": 3,
-        "request_delay_ms": 500,
-        "retry_delay_ms": 2000
+    "// 环境变量覆盖": "以下环境变量可以覆盖配置文件中的设置",
+    "environment_variables": {
+        "SOURCE_URL": "覆盖数据源URL",
+        "ARCHIVE_ROOT": "覆盖存档根目录",
+        "DAYS": "覆盖获取天数",
+        "OPENAI_API_KEY": "覆盖API密钥（兼容OpenAI格式）",
+        "OPENAI_API_BASE": "覆盖API基础URL",
+        "OPENAI_MODEL": "覆盖模型名称",
+        "OPENAI_VERIFY_SSL": "覆盖SSL验证设置（0/false/no禁用）",
+        "BATCH_OPTIMIZATION_ENABLED": "覆盖批量优化开关",
+        "MAX_BATCH_SIZE": "覆盖最大批量大小",
+        "CACHE_ENABLED": "覆盖缓存开关"
     },
-    "fallback": {
-        "use_heuristic_on_failure": true,
-        "max_consecutive_failures": 3
-    }
+    "// 注意事项": [
+        "1. models数组中的模型按顺序尝试，直到找到第一个可用的模型",
+        "2. 设置enabled=false可以禁用某个模型",
+        "3. 本地模型的api_key可以设为'EMPTY'",
+        "4. verify_ssl=false仅用于本地或内网服务",
+        "5. 环境变量的优先级高于配置文件",
+        "6. 如果所有AI模型都不可用，会自动降级到启发式算法"
+    ]
 }

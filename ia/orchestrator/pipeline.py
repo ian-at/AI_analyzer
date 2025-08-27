@@ -8,6 +8,7 @@ from typing import Any
 from ..analyzer.anomaly import heuristic_anomalies, load_history_for_keys, compute_entry_features
 from ..analyzer.k2_client import K2Client
 from ..analyzer.model_provider import K2ProviderAdapter
+from ..config import load_analysis_config
 from ..fetcher.crawler import crawl_incremental
 from ..parser.html_parser import parse_ub_html
 from ..parser.unixbench_parser import parse_unixbench_pre_text
@@ -98,10 +99,18 @@ def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_exis
     meta = read_json(os.path.join(run_dir, "meta.json"))
     entries = read_jsonl(os.path.join(run_dir, "ub.jsonl"))
 
+    # 加载分析配置
+    analysis_cfg = load_analysis_config()
+    min_samples = analysis_cfg.get("anomaly_detection", {}).get(
+        "min_samples_for_anomaly", 10)
+    min_history = analysis_cfg.get("anomaly_detection", {}).get(
+        "min_samples_for_history", 10)
+
     # 构建 (suite, case, metric) 粒度的历史数据
     keys = [(e.get("suite", ""), e.get("case", ""), e.get("metric", ""))
             for e in entries]
-    history = load_history_for_keys(archive_root, keys)
+    history = load_history_for_keys(
+        archive_root, keys, min_samples=min_history)
 
     anomalies: list[dict[str, Any]] = []
     ai_analysis_failed = False  # 移到函数顶层，确保作用域正确
@@ -170,9 +179,11 @@ def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_exis
         # 如果AI分析失败，fallback到启发式算法
         if ai_analysis_failed:
             print("AI分析失败，fallback到启发式算法")
-            anomalies = heuristic_anomalies(entries, history)
+            anomalies = heuristic_anomalies(
+                entries, history, min_samples_for_anomaly=min_samples)
     else:
-        anomalies = heuristic_anomalies(entries, history)
+        anomalies = heuristic_anomalies(
+            entries, history, min_samples_for_anomaly=min_samples)
 
     # 保存异常结果与汇总
     write_jsonl(os.path.join(run_dir, "anomalies.k2.jsonl"), anomalies)
