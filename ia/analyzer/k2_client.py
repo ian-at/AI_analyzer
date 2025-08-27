@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
 import time
+import logging
+from typing import Any, Optional, List, Dict
+from dataclasses import dataclass
+from enum import Enum
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from ..config import ModelConfig
+from .batch_optimizer import BatchOptimizer, AnalysisBatch
+from .progress_tracker import get_tracker
 
 
 JSON_SCHEMA_DESC = {
@@ -90,9 +97,6 @@ PROMPT_SYSTEM = (
 def coerce_json_from_text(text: str) -> dict:
     # Remove code fences if present
     t = text.strip()
-    if t.startswith("```)"):
-        # unlikely branch; keep generic
-        t = t.strip("` ")
     if t.startswith("```"):
         t = t.strip("` ")
         # try to find the json block
@@ -109,33 +113,261 @@ def coerce_json_from_text(text: str) -> dict:
     return json.loads(t)
 
 
+@dataclass
+class ModelEndpoint:
+    """模型端点配置"""
+    name: str
+    api_base: str
+    api_key: str
+    model: str
+    enabled: bool = True
+    priority: int = 1
+    timeout: int = 120
+    max_retries: int = 3
+    last_used: float = 0
+    error_count: int = 0
+    success_count: int = 0
+
+
 class K2Client:
     def __init__(self, cfg: ModelConfig):
         self.cfg = cfg
+        self.logger = logging.getLogger(__name__)
+        self.batch_optimizer = BatchOptimizer()
+        self.models = []
+        self.config = {}  # 初始化配置字典
+        self.session = self._create_session()
+        self._load_models_config()
+
+    def _create_session(self) -> requests.Session:
+        """创建带重试机制的会话"""
+        session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            method_whitelist=["POST", "GET"]  # 兼容旧版本urllib3
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        return session
+
+    def _load_models_config(self):
+        """加载模型配置"""
+        # 查找配置文件
+        config_paths = [
+            "models_config.json",
+            "./models_config.json",
+            os.path.join(os.path.dirname(__file__),
+                         "../../models_config.json"),
+            "/data/intelligent-analysis/models_config.json",  # 添加绝对路径
+        ]
+
+        config_data = None
+        for path in config_paths:
+            abs_path = os.path.abspath(path)
+            self.logger.debug(
+                f"检查配置文件: {abs_path} (存在={os.path.exists(abs_path)})")
+            if os.path.exists(abs_path):
+                try:
+                    with open(abs_path, "r", encoding="utf-8") as f:
+                        config_data = json.load(f)
+                        self.logger.info(f"成功从 {abs_path} 加载模型配置")
+                        break
+                except Exception as e:
+                    self.logger.warning(f"加载配置文件 {abs_path} 失败: {e}")
+
+        if config_data and "models" in config_data:
+            # 从配置文件加载多个模型
+            for model_cfg in config_data["models"]:
+                endpoint = ModelEndpoint(
+                    name=model_cfg.get("name", ""),
+                    api_base=model_cfg.get("api_base", ""),
+                    api_key=model_cfg.get("api_key", ""),
+                    model=model_cfg.get("model", ""),
+                    enabled=model_cfg.get("enabled", True),
+                    priority=model_cfg.get("priority", 1),
+                    timeout=model_cfg.get("timeout", 120),
+                    max_retries=model_cfg.get("max_retries", 3)
+                )
+                if endpoint.enabled:
+                    self.models.append(endpoint)
+
+            # 保存配置供后续使用
+            self.config = config_data
+
+            # 保存批量优化配置
+            if "batch_optimization" in config_data:
+                batch_cfg = config_data["batch_optimization"]
+                self.batch_optimizer.max_batch_size = batch_cfg.get(
+                    "max_batch_size", 10)
+                self.batch_optimizer.min_batch_size = batch_cfg.get(
+                    "min_batch_size", 3)
+
+        # 如果没有配置文件，使用环境变量或默认配置
+        if not self.models and self.cfg.api_key and self.cfg.model:
+            endpoint = ModelEndpoint(
+                name="default",
+                api_base=self.cfg.api_base or "https://api.openai.com/v1",
+                api_key=self.cfg.api_key,
+                model=self.cfg.model,
+                enabled=True
+            )
+            self.models.append(endpoint)
+
+        # 按优先级排序
+        self.models.sort(key=lambda x: x.priority)
+
+        if self.models:
+            self.logger.info(f"已加载 {len(self.models)} 个模型端点")
+            for m in self.models:
+                self.logger.info(f"  - {m.name}: {m.model} (优先级={m.priority})")
 
     def enabled(self) -> bool:
-        return self.cfg.enabled
+        return len(self.models) > 0
 
-    def analyze(self, run_id: str, group_id: str, entries: list[dict[str, Any]], history: dict[str, list[float]]) -> dict:
+    def _select_model(self) -> Optional[ModelEndpoint]:
+        """选择最佳可用模型"""
+        available = [m for m in self.models if m.enabled and m.error_count < 5]
+        if not available:
+            # 重置错误计数
+            for m in self.models:
+                m.error_count = 0
+            available = [m for m in self.models if m.enabled]
+
+        if not available:
+            return None
+
+        # 选择优先级最高且成功率最好的
+        available.sort(key=lambda x: (
+            x.priority, -x.success_count, x.error_count))
+
+        # 简单的速率限制：避免过快调用同一个模型
+        now = time.time()
+        for m in available:
+            if now - m.last_used > 0.5:  # 至少间隔0.5秒
+                return m
+
+        return available[0]
+
+    def analyze(self, run_id: str, group_id: str, entries: list[dict[str, Any]], history: dict, job_id: str = None) -> dict:
+        """分析异常，支持批量优化和多模型"""
         if not self.enabled():
-            raise RuntimeError(
-                "K2 客户端未启用（缺少 OPENAI_* 环境变量）")
+            raise RuntimeError("AI 客户端未启用（缺少配置）")
 
-        base = self.cfg.api_base or "https://api.openai.com/v1"
-        url = base.rstrip("/") + "/chat/completions"
+        # 创建进度跟踪
+        if job_id:
+            tracker = get_tracker()
+            tracker.create_job(job_id, total_batches=1)
+            tracker.update_progress(job_id, status="running")
+
+            # 检查是否需要批量处理
+        # 根据配置的批次大小决定是否使用批量优化
+        batch_config = self.config.get("batch_optimization", {})
+        max_batch_size = batch_config.get("max_batch_size", 10)
+        min_batch_size = batch_config.get("min_batch_size", 3)
+
+        # 当条目数超过最大批次大小时，使用批量优化
+        if len(entries) > max_batch_size:
+            self.logger.info(
+                f"检测到 {len(entries)} 个条目，超过最大批次大小 {max_batch_size}，使用批量优化")
+            return self._analyze_batch_optimized(run_id, group_id, entries, history, job_id)
+
+        # 标准分析流程
+        result = self._analyze_with_fallback(
+            run_id, group_id, entries, history, job_id)
+
+        # 更新进度为完成
+        if job_id:
+            tracker = get_tracker()
+            tracker.update_progress(
+                job_id, status="completed", current_batch=1, total_batches=1)
+
+        return result
+
+    def _analyze_with_fallback(self, run_id: str, group_id: str,
+                               entries: list[dict[str, Any]],
+                               history: dict, job_id: str = None) -> dict:
+        """带故障转移的分析"""
+        last_error = None
+        used_model = None
+
+        for attempt in range(3):
+            model = self._select_model()
+            if not model:
+                self.logger.error("没有可用的模型")
+                break
+
+            try:
+                self.logger.info(f"使用模型 {model.name} 进行分析")
+                if job_id:
+                    tracker = get_tracker()
+                    tracker.update_progress(job_id, current_model=model.model)
+
+                result = self._analyze_with_model(
+                    model, run_id, group_id, entries, history)
+                used_model = model.model  # 记录成功使用的模型
+
+                # 在结果中添加实际使用的模型信息
+                if "summary" not in result:
+                    result["summary"] = {}
+                result["summary"]["analysis_model"] = model.model
+                result["summary"]["model_name"] = model.name
+
+                return result
+            except Exception as e:
+                last_error = e
+                model.error_count += 1
+                self.logger.warning(
+                    f"模型 {model.name} 分析失败 (尝试 {attempt + 1}/3): {e}")
+                time.sleep(2 ** attempt)  # 指数退避
+
+        # 所有模型都失败，使用启发式算法
+        self.logger.warning(f"所有AI模型失败，回退到启发式算法: {last_error}")
+        if job_id:
+            tracker = get_tracker()
+            tracker.update_progress(
+                job_id, status="failed", error_message=str(last_error))
+
+        result = self.batch_optimizer.fallback_to_heuristic(entries, history)
+
+        # 标记为启发式算法
+        if "summary" not in result:
+            result["summary"] = {}
+        result["summary"]["analysis_model"] = "heuristic"
+        result["summary"]["model_name"] = "heuristic"
+
+        return result
+
+    def _analyze_with_model(self, model: ModelEndpoint, run_id: str, group_id: str,
+                            entries: list[dict[str, Any]],
+                            history: dict[str, list[float]]) -> dict:
+        """使用指定模型进行分析"""
+        model.last_used = time.time()
+
+        url = model.api_base.rstrip("/") + "/chat/completions"
         headers = {
             "Content-Type": "application/json",
         }
 
         # 仅在有有效API_KEY时才添加Authorization头（支持本地模型）
-        if self.cfg.api_key and self.cfg.api_key.strip() and self.cfg.api_key.upper() != "EMPTY":
-            headers["Authorization"] = f"Bearer {self.cfg.api_key}"
+        if model.api_key and model.api_key.strip() and model.api_key.upper() != "EMPTY":
+            headers["Authorization"] = f"Bearer {model.api_key}"
+
+        # 转换history的键为字符串（JSON不支持tuple作为键）
+        history_str_keys = {}
+        for k, v in history.items():
+            if isinstance(k, tuple):
+                history_str_keys["::".join(str(x) for x in k)] = v
+            else:
+                history_str_keys[k] = v
 
         user_payload = {
             "run_id": run_id,
             "group_id": group_id,
             "entries": entries,
-            "history": history,
+            "history": history_str_keys,
             "context": {
                 "arch": "arm64",
                 "os": "linux",
@@ -148,14 +380,11 @@ class K2Client:
                 "必须包含完整的 supporting_evidence 字段，包含 history_n、mean、median、robust_z 等统计信息；"
                 "必须包含 root_causes 数组，每个根因包含 cause 和 likelihood 字段；"
                 "必须包含 suggested_next_checks 数组，每个异常至少提供3-5个具体可执行的检查命令或步骤；"
-                "suggested_next_checks 示例：『检查 /proc/cpuinfo 确认CPU频率』、『运行 cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor』、『使用 htop 检查系统负载』、『查看 dmesg | grep -i thermal 检查热限频』、『检查 /proc/cgroups 确认资源限制』等；"
-                "结合 features（如 robust_z、pct_change_vs_median、mean、median、history_n、current_value）给出根因与证据引用；"
-                "若证据不足，请不要硬判异常；所有自然语言字段必须使用中文；结合 ARM64 与 pKVM 场景优先给出相关根因，避免 x86 专属术语。"
             ),
         }
 
         data = {
-            "model": self.cfg.model,
+            "model": model.model,
             "messages": [
                 {"role": "system", "content": PROMPT_SYSTEM},
                 {"role": "user", "content": json.dumps(
@@ -164,119 +393,129 @@ class K2Client:
             "temperature": 0.2,
         }
 
-        # 简单退避重试（429/5xx）：最多 20 次，指数退避且尊重 Retry-After
-        backoff = 5.0
-        for attempt in range(20):
-            resp = requests.post(
-                url,
-                headers=headers,
-                json=data,
-                timeout=120,
-                verify=self.cfg.verify_ssl if self.cfg.verify_ssl is not None else True,
-            )
-            if resp.status_code == 429 or 500 <= resp.status_code < 600:
-                if attempt == 19:
-                    resp.raise_for_status()
-                retry_after = resp.headers.get("Retry-After")
-                delay = backoff
-                if retry_after is not None:
-                    try:
-                        delay = float(retry_after)
-                    except Exception:
-                        import re as _re
-                        m = _re.search(
-                            r"([0-9]+(?:\.[0-9]+)?)", str(retry_after))
-                        if m:
-                            try:
-                                delay = float(m.group(1))
-                            except Exception:
-                                delay = backoff
-                time.sleep(delay)
-                backoff = min(backoff * 2.0, 60.0)
-                continue
-            try:
-                resp.raise_for_status()
-            except requests.exceptions.SSLError:
-                # 证书错误时直接抛出，让上层选择启发式回退
-                raise
-            break
+        resp = self.session.post(
+            url,
+            headers=headers,
+            json=data,
+            timeout=model.timeout,
+            verify=True
+        )
+        resp.raise_for_status()
+
+        model.success_count += 1
+        model.error_count = max(0, model.error_count - 1)
+
         js = resp.json()
         content = js["choices"][0]["message"]["content"]
+
         try:
             result = coerce_json_from_text(content)
-            # 为每个异常项补充支撑证据（如果AI没有完整返回）
+            # 补充支撑证据
             if "anomalies" in result:
                 from .anomaly import compute_entry_features
-                # 重新计算特征以确保supporting_evidence完整
                 features = compute_entry_features(entries, history)
                 for anomaly in result["anomalies"]:
                     key = f"{anomaly.get('suite', '')}::{anomaly.get('case', '')}::{anomaly.get('metric', '')}"
                     feature_data = features.get(key, {})
 
-                    # 确保supporting_evidence字段存在且完整
+                    # 确保supporting_evidence字段完整
                     if not anomaly.get("supporting_evidence"):
                         anomaly["supporting_evidence"] = {}
 
                     evidence = anomaly["supporting_evidence"]
-                    # 补充缺失的统计信息
-                    if "history_n" not in evidence:
-                        evidence["history_n"] = feature_data.get(
-                            "history_n", 0)
-                    if "mean" not in evidence:
-                        evidence["mean"] = feature_data.get("mean")
-                    if "median" not in evidence:
-                        evidence["median"] = feature_data.get("median")
-                    if "robust_z" not in evidence:
-                        evidence["robust_z"] = feature_data.get("robust_z")
-                    if "pct_change_vs_median" not in evidence:
-                        evidence["pct_change_vs_median"] = feature_data.get(
-                            "pct_change_vs_median")
-                    if "pct_change_vs_mean" not in evidence:
-                        evidence["pct_change_vs_mean"] = feature_data.get(
-                            "pct_change_vs_mean")
+                    for field in ["history_n", "mean", "median", "robust_z", "pct_change_vs_median", "pct_change_vs_mean"]:
+                        if field not in evidence:
+                            evidence[field] = feature_data.get(field)
 
-                        # 确保root_causes字段存在
+                    # 确保必要字段存在
                     if not anomaly.get("root_causes"):
                         anomaly["root_causes"] = []
-
-                    # 确保suggested_next_checks字段存在且有实用内容
                     if not anomaly.get("suggested_next_checks"):
                         anomaly["suggested_next_checks"] = []
 
-                    # 如果AI没有生成足够的建议，补充通用建议
-                    if len(anomaly["suggested_next_checks"]) < 3:
-                        base_checks = [
-                            "检查 /proc/cpuinfo 确认CPU频率和核心配置",
-                            "查看 /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor 检查频率调节策略",
-                            "运行 htop 或 top 检查系统负载和进程状态",
-                            "查看 dmesg | grep -E '(thermal|throttle)' 检查热限频告警",
-                            "检查 /proc/interrupts 查看中断分布和负载",
-                            "验证 /proc/cgroups 和 /sys/fs/cgroup 下的资源限制配置"
-                        ]
-
-                        # 根据性能变化方向提供更具体的建议
-                        if feature_data.get("robust_z", 0) < -2:  # 性能下降
-                            specific_checks = [
-                                "检查系统是否进入节能模式：cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor",
-                                "查看是否有异常高的系统调用：strace -c -p <pid>",
-                                "检查内存使用情况：free -h && cat /proc/meminfo",
-                                "确认虚拟化开销：查看 /proc/stat 中的steal时间"
-                            ]
-                        else:  # 性能提升或其他
-                            specific_checks = [
-                                "确认测试环境一致性：检查内核版本和编译选项",
-                                "验证缓存命中率和内存带宽：perf stat -e cache-misses",
-                                "检查是否有调度优化：cat /proc/sys/kernel/sched_*"
-                            ]
-
-                        # 补充建议到最少4个
-                        needed = 4 - len(anomaly["suggested_next_checks"])
-                        available_checks = base_checks + specific_checks
-                        anomaly["suggested_next_checks"].extend(
-                            available_checks[:needed])
-
         except Exception as e:
-            # 如模型未返回合规 JSON，则返回空结果并附带原始输出与错误信息
             result = {"summary": {"total_anomalies": 0},
                       "anomalies": [], "_raw": content, "_error": str(e)}
+
         return result
+
+    def _analyze_batch_optimized(self, run_id: str, group_id: str,
+                                 entries: list[dict[str, Any]],
+                                 history: dict, job_id: str = None) -> dict:
+        """使用批量优化进行分析"""
+        self.logger.info(f"使用批量优化分析 {len(entries)} 个条目")
+
+        # 优化批次
+        batches = self.batch_optimizer.optimize_batches(entries, history)
+        total_batches = len(batches)
+        self.logger.info(f"分成 {total_batches} 个批次进行分析")
+
+        # 更新总批次数
+        if job_id:
+            tracker = get_tracker()
+            tracker.update_progress(
+                job_id, total_batches=total_batches, current_batch=0)
+
+        batch_results = []
+        current_batch_num = 0
+
+        def analyze_batch(batch: AnalysisBatch) -> dict:
+            nonlocal current_batch_num
+            current_batch_num += 1
+
+            # 更新进度
+            if job_id:
+                tracker = get_tracker()
+                progress_pct = (current_batch_num / total_batches) * 100
+                tracker.update_progress(
+                    job_id,
+                    current_batch=current_batch_num,
+                    total_batches=total_batches
+                )
+                self.logger.info(
+                    f"批次 {current_batch_num}/{total_batches} 开始分析 ({progress_pct:.1f}%)")
+
+            batch_entries = batch.entries
+            batch_history = {}
+            for e in batch_entries:
+                key = f"{e.get('suite', '')}::{e.get('case', '')}::{e.get('metric', '')}"
+                k = (e.get('suite', ''), e.get('case', ''), e.get('metric', ''))
+                if k in history:
+                    batch_history[key] = history[k]
+
+            try:
+                result = self._analyze_with_fallback(
+                    run_id, f"{group_id}_batch_{batch.batch_id}",
+                    batch_entries, batch_history, job_id
+                )
+                self.logger.info(
+                    f"批次 {current_batch_num}/{total_batches} 分析完成")
+                return result
+            except Exception as e:
+                self.logger.error(f"批次 {batch.batch_id} 分析失败: {e}")
+                return self.batch_optimizer.fallback_to_heuristic(batch_entries, history)
+
+        # 顺序处理批次（为了更好的进度跟踪）
+        for batch in batches:
+            result = analyze_batch(batch)
+            batch_results.append(result)
+
+        # 标记为完成
+        if job_id:
+            tracker = get_tracker()
+            tracker.update_progress(
+                job_id, status="completed")
+
+        # 合并结果
+        merged = self.batch_optimizer.merge_batch_results(batch_results)
+
+        # 确保包含模型信息
+        if batch_results and "summary" in batch_results[0]:
+            if "summary" not in merged:
+                merged["summary"] = {}
+            merged["summary"]["analysis_model"] = batch_results[0]["summary"].get(
+                "analysis_model", "unknown")
+            merged["summary"]["model_name"] = batch_results[0]["summary"].get(
+                "model_name", "unknown")
+
+        return merged

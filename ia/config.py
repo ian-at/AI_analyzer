@@ -11,6 +11,11 @@ class ModelConfig:
     api_base: str | None
     model: str | None
     verify_ssl: bool | None = None
+    # 新增多模型配置支持
+    models_config_file: str | None = None
+    batch_optimization_enabled: bool = True
+    max_batch_size: int = 10
+    cache_enabled: bool = True
 
     @property
     def enabled(self) -> bool:
@@ -18,9 +23,11 @@ class ModelConfig:
         has_key = self.api_key and self.api_key.strip() and self.api_key.upper() != "EMPTY"
         has_model = bool(self.model and self.model.strip())
         has_base = bool(self.api_base and self.api_base.strip())
+        has_models_config = bool(
+            self.models_config_file and os.path.exists(self.models_config_file))
 
-        # 有API_KEY和模型名称，或者有本地API_BASE和模型名称（API_KEY为EMPTY）
-        return (has_key and has_model) or (not has_key and has_model and has_base)
+        # 有API_KEY和模型名称，或者有本地API_BASE和模型名称（API_KEY为EMPTY），或者有多模型配置文件
+        return (has_key and has_model) or (not has_key and has_model and has_base) or has_models_config
 
 
 @dataclass
@@ -37,18 +44,35 @@ def load_env_config(
     days: int | None = None,
 ) -> AppConfig:
     # 先尝试从配置文件加载（无需每次手动导入），若不存在再回退到环境变量
-    # 支持读取 ./config.json 或 <archive_root>/config.json（项目根优先）
+    # 支持读取多个配置文件位置
+    # 只使用相对路径
     cfg_paths = [
-        os.path.join(os.getcwd(), "config.json"),
+        "models_config.json",
+        "./models_config.json",
+        "config.json",
+        "./config.json",
+        os.path.join(archive_root or "./archive", "models_config.json"),
         os.path.join(archive_root or "./archive", "config.json"),
     ]
     file_cfg = {}
-    for p in cfg_paths:
+    models_cfg_file = None
+
+    # 已在上面合并加载配置
+
+    # 查找模型配置文件（优先models_config.json）
+    for p in ["models_config.json", "./models_config.json", "config.json", "./config.json"]:
         try:
             if os.path.exists(p):
                 with open(p, "r", encoding="utf-8") as f:
-                    file_cfg = json.load(f)
-                    break
+                    temp_cfg = json.load(f)
+                    # 如果是models_config或包含models字段，则作为模型配置
+                    if "models" in temp_cfg or "models_config" in p:
+                        models_cfg_file = p
+                    # 如果还没有主配置，也使用这个文件
+                    if not file_cfg:
+                        file_cfg = temp_cfg
+                    if models_cfg_file:
+                        break
         except Exception:
             pass
 
@@ -85,11 +109,30 @@ def load_env_config(
         except Exception:
             days = 3
 
+    # 读取批量优化和缓存配置
+    batch_opt_enabled = file_cfg.get("batch_optimization", {}).get(
+        "enabled", True) if file_cfg else True
+    max_batch_size = file_cfg.get("batch_optimization", {}).get(
+        "max_batch_size", 10) if file_cfg else 10
+    cache_enabled = file_cfg.get("batch_optimization", {}).get(
+        "cache_enabled", True) if file_cfg else True
+
+    # 环境变量覆盖
+    batch_opt_enabled = os.environ.get("BATCH_OPTIMIZATION_ENABLED", str(
+        batch_opt_enabled)).lower() in ("true", "1", "yes")
+    max_batch_size = int(os.environ.get("MAX_BATCH_SIZE", str(max_batch_size)))
+    cache_enabled = os.environ.get("CACHE_ENABLED", str(
+        cache_enabled)).lower() in ("true", "1", "yes")
+
     model_cfg = ModelConfig(
         api_key=api_key,
         api_base=api_base,
         model=model,
         verify_ssl=verify_ssl,
+        models_config_file=models_cfg_file,
+        batch_optimization_enabled=batch_opt_enabled,
+        max_batch_size=max_batch_size,
+        cache_enabled=cache_enabled,
     )
     return AppConfig(
         source_url=source_url,

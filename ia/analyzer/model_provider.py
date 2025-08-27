@@ -18,8 +18,14 @@ class K2ProviderAdapter:
         self._k2 = k2_client
 
     def name(self) -> str:
-        # 直接返回完整的模型名称
+        # 返回第一个启用的模型名称
         try:
+            if hasattr(self._k2, 'models') and self._k2.models:
+                # 返回优先级最高的模型
+                enabled_models = [m for m in self._k2.models if m.enabled]
+                if enabled_models:
+                    return enabled_models[0].model
+            # 回退到cfg中的model
             model_name = getattr(self._k2.cfg, "model", None)
             if model_name:
                 return model_name
@@ -29,6 +35,10 @@ class K2ProviderAdapter:
 
     def version(self) -> str:
         try:
+            if hasattr(self._k2, 'models') and self._k2.models:
+                enabled_models = [m for m in self._k2.models if m.enabled]
+                if enabled_models:
+                    return enabled_models[0].name
             return getattr(self._k2.cfg, "model", "unknown") or "unknown"
         except Exception:
             return "unknown"
@@ -36,5 +46,5 @@ class K2ProviderAdapter:
     def enabled(self) -> bool:
         return self._k2.enabled()
 
-    def analyze(self, run_id: str, group_id: str, entries: list[dict[str, Any]], history: dict[str, list[float]]) -> dict:
-        return self._k2.analyze(run_id, group_id, entries, history)
+    def analyze(self, run_id: str, group_id: str, entries: list[dict[str, Any]], history: dict[str, list[float]], job_id: str = None) -> dict:
+        return self._k2.analyze(run_id, group_id, entries, history, job_id=job_id)

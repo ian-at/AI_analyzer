@@ -1,64 +1,61 @@
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
+*$py.class
 *.so
-.mypy_cache/
-.pytest_cache/
-.venv/
-venv/
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
 *.egg-info/
-*.swp
-*.swo
+.installed.cfg
+*.egg
 
-# Logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
 
-# Node / Frontend
-ia/webapp/ui/node_modules/
-
-# Vite build output (served by FastAPI,不入库)
-ia/webapp/static/ui/
-
-# IDE/Editor
+# IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
-# Local settings
-*.local
-*.secret
-.secrets*/
-config.json
-.cursor/
-
-# Archive artifacts to keep repo small (报告与索引)
-#archive/.analysis_status
-#archive/runs_index.jsonl
-#archive/*/index.jsonl
-#archive/*/run_*/report.html
-#archive/*/run_*/anomalies.k2.jsonl
-#archive/*/run_*/ub.jsonl
-#archive/*/run_*/summary.json
-#archive/*/run_*/meta.json
-#archive/*/run_*/raw_html/
+# Project specific
 archive/
+cache/
+*.log
+.env
+.cursor
+models_config.json
 
-# OS
-.DS_Store
-Thumbs.db
+# Node modules (for frontend)
+node_modules/
+ia/webapp/ui/node_modules/
+ia/webapp/ui/dist/
+ia/webapp/static/ui/
 
-# Runtime
-/tmp/ia_webapp.log
-nohup.out
+# Test files
+test_*.py
+*_test.py
 
-# Coverage / build
-htmlcov/
-coverage.xml
-build/
-dist/
+# Documentation (temporary)
+OPTIMIZATION.md
+PROGRESS_TRACKING.md
 
+# Temporary files
+*.tmp
+*.bak
+/tmp/

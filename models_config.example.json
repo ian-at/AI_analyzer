@@ -1,0 +1,44 @@
+{
+    "models": [
+        {
+            "name": "model-1",
+            "api_base": "https://your-api-endpoint.com/v1",
+            "api_key": "your-api-key-here",
+            "model": "your-model-name",
+            "enabled": true,
+            "priority": 1,
+            "timeout": 120,
+            "max_retries": 3
+        },
+        {
+            "name": "model-2",
+            "api_base": "https://another-api-endpoint.com/v1",
+            "api_key": "another-api-key",
+            "model": "another-model-name",
+            "enabled": true,
+            "priority": 2,
+            "timeout": 120,
+            "max_retries": 3
+        }
+    ],
+    "default_model": "model-1",
+    "batch_optimization": {
+        "enabled": true,
+        "max_batch_size": 10,
+        "min_batch_size": 3
+    },
+    "cache": {
+        "enabled": true,
+        "ttl_hours": 24,
+        "directory": "./cache"
+    },
+    "performance": {
+        "concurrent_requests": 3,
+        "request_delay_ms": 500,
+        "retry_delay_ms": 2000
+    },
+    "fallback": {
+        "use_heuristic_on_failure": true,
+        "max_consecutive_failures": 3
+    }
+}

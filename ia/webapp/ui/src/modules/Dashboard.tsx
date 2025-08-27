@@ -53,7 +53,18 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
     // 分析相关状态
     const [showAnalysisModal, setShowAnalysisModal] = useState(false)
     const [analysisForm] = Form.useForm()
-    const [analysisProgress, setAnalysisProgress] = useState<{ visible: boolean, current: number, total?: number, status?: string }>({ visible: false, current: 0 })
+    const [analysisProgress, setAnalysisProgress] = useState<{
+        visible: boolean,
+        current: number,
+        total?: number,
+        status?: string,
+        currentBatch?: number,
+        totalBatches?: number,
+        currentModel?: string,
+        elapsedTime?: number,
+        estimatedRemaining?: number,
+        errorMessage?: string
+    }>({ visible: false, current: 0 })
     const [currentJobId, setCurrentJobId] = useState<string | null>(null)
     const [selectedMetric, setSelectedMetric] = useState<string>('System Benchmarks Index Score')
 
@@ -84,7 +95,7 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
         return `/api/v1/runs?${params.toString()}`
     }, [page, pageSize, sortBy, order, abnormalOnly, engine, patchId, dateRange, visibleCols])
 
-    const runs = useQuery({ queryKey: ['runs', runsUrl], queryFn: () => getJSON<RunsResp>(runsUrl), keepPreviousData: true })
+    const runs = useQuery({ queryKey: ['runs', runsUrl], queryFn: () => getJSON<RunsResp>(runsUrl), placeholderData: (previousData) => previousData })
     const [metric, setMetric] = useState<string>('System Benchmarks Index Score')
     const series = useQuery({ queryKey: ['series', metric], queryFn: () => getJSON<SeriesResp>('/api/v1/series?metric=' + encodeURIComponent(metric)) })
     const summary = useQuery({ queryKey: ['summary'], queryFn: () => getJSON<SummaryResp>('/api/v1/anomalies/summary') })
@@ -117,7 +128,7 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
             const r = await fetch(url, { method: 'POST' })
             const js: JobResp = await r.json()
             if (!r.ok) {
-                message.error(js as any)?.error || '启动分析失败'
+                message.error((js as any)?.error || '启动分析失败')
                 setAnalysisProgress({ visible: false, current: 0 })
                 return
             }
@@ -125,49 +136,85 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
             setCurrentJobId(js.job_id)
             message.success('分析任务已启动：' + js.job_id)
 
-            // 监控任务进度 - 基于真实任务状态
+            // 监控任务进度 - 使用新的进度API
             const checkProgress = async () => {
                 try {
-                    const jr = await fetch(`/api/v1/jobs/${js.job_id}`)
-                    if (!jr.ok) {
-                        if (jr.status === 404) {
-                            setAnalysisProgress({ visible: false, current: 0 })
-                            message.error('任务不存在或已过期')
+                    // 首先尝试使用新的进度API
+                    const progressResp = await fetch(`/api/v1/progress/${js.job_id}`)
+                    if (progressResp.ok) {
+                        const progressData = await progressResp.json()
+
+                        // 更新进度信息
+                        setAnalysisProgress({
+                            visible: true,
+                            current: progressData.progress_percentage || 0,
+                            status: progressData.status,
+                            currentBatch: progressData.current_batch,
+                            totalBatches: progressData.total_batches,
+                            currentModel: progressData.current_model,
+                            elapsedTime: progressData.elapsed_time,
+                            estimatedRemaining: progressData.estimated_remaining,
+                            errorMessage: progressData.error_message
+                        })
+
+                        if (progressData.status === 'completed') {
+                            setAnalysisProgress(prev => ({ ...prev, visible: false }))
+                            message.success(`分析完成！`)
+                            // 刷新数据
+                            runs.refetch()
+                            summary.refetch()
+                            analysisStatus.refetch()
+                            setCurrentJobId(null)
+                            return
+                        } else if (progressData.status === 'failed') {
+                            setAnalysisProgress(prev => ({ ...prev, visible: false }))
+                            message.error(`分析失败: ${progressData.error_message || '未知错误'}`)
                             setCurrentJobId(null)
                             return
                         }
-                        throw new Error(`HTTP ${jr.status}`)
-                    }
-
-                    const jobStatus = await jr.json()
-                    const total = jobStatus.total || jobStatus.result?.total || analysisProgress.total || 0
-                    const current = jobStatus.current || 0
-
-                    if (jobStatus.status === 'completed') {
-                        setAnalysisProgress({ visible: false, current: 100, total })
-                        const processed = jobStatus.result?.processed || 0
-                        message.success(`分析完成！处理了 ${processed} 个运行`)
-                        // 刷新所有数据
-                        runs.refetch()
-                        summary.refetch()
-                        top.refetch()
-                        tl.refetch()
-                        analysisStatus.refetch()
-                        setCurrentJobId(null)
-                    } else if (jobStatus.status === 'failed') {
-                        setAnalysisProgress({ visible: false, current: 0 })
-                        const errorMsg = jobStatus.error || jobStatus.result?.error || '未知错误'
-                        message.error('分析失败：' + errorMsg)
-                        setCurrentJobId(null)
-                    } else if (jobStatus.status === 'running') {
-                        // 显示运行中状态（基于 current/total 真实进度）
-                        const percent = total > 0 ? Math.min(99, Math.floor((current / total) * 100)) : 50
-                        setAnalysisProgress({ visible: true, current: percent, total, status: jobStatus.message || '正在分析中，请稍候...' })
-                        setTimeout(checkProgress, 2000)
                     } else {
-                        // pending 状态
-                        setAnalysisProgress({ visible: true, current: 10, status: '任务排队中...' })
-                        setTimeout(checkProgress, 1000)
+                        // 回退到旧的任务API
+                        const jr = await fetch(`/api/v1/jobs/${js.job_id}`)
+                        if (!jr.ok) {
+                            if (jr.status === 404) {
+                                setAnalysisProgress({ visible: false, current: 0 })
+                                message.error('任务不存在或已过期')
+                                setCurrentJobId(null)
+                                return
+                            }
+                            throw new Error(`HTTP ${jr.status}`)
+                        }
+
+                        const jobStatus = await jr.json()
+                        const total = jobStatus.total || jobStatus.result?.total || analysisProgress.total || 0
+                        const current = jobStatus.current || 0
+
+                        if (jobStatus.status === 'completed') {
+                            setAnalysisProgress({ visible: false, current: 100, total })
+                            const processed = jobStatus.result?.processed || 0
+                            message.success(`分析完成！处理了 ${processed} 个运行`)
+                            // 刷新所有数据
+                            runs.refetch()
+                            summary.refetch()
+                            top.refetch()
+                            tl.refetch()
+                            analysisStatus.refetch()
+                            setCurrentJobId(null)
+                        } else if (jobStatus.status === 'failed') {
+                            setAnalysisProgress({ visible: false, current: 0 })
+                            const errorMsg = jobStatus.error || jobStatus.result?.error || '未知错误'
+                            message.error('分析失败：' + errorMsg)
+                            setCurrentJobId(null)
+                        } else if (jobStatus.status === 'running') {
+                            // 显示运行中状态（基于 current/total 真实进度）
+                            const percent = total > 0 ? Math.min(99, Math.floor((current / total) * 100)) : 50
+                            setAnalysisProgress({ visible: true, current: percent, total, status: jobStatus.message || '正在分析中，请稍候...' })
+                            setTimeout(checkProgress, 2000)
+                        } else {
+                            // pending 状态
+                            setAnalysisProgress({ visible: true, current: 10, status: '任务排队中...' })
+                            setTimeout(checkProgress, 1000)
+                        }
                     }
                 } catch (e) {
                     console.warn('检查进度失败:', e)
@@ -187,37 +234,82 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
     const reanalyzeSingleRun = async (rel: string, engine: string = 'auto') => {
         try {
             const r = await fetch(`/api/v1/runs/${encodeURIComponent(rel)}/reanalyze?engine=${engine}`, { method: 'POST' })
-            const js: JobResp & { rel: string } = await r.json()
+            const js: JobResp & { rel: string, progress_url?: string } = await r.json()
             if (!r.ok) {
                 message.error((js as any)?.error || '启动单个分析失败')
                 return
             }
 
+            setCurrentJobId(js.job_id)
             message.success(`已启动分析任务: ${js.job_id}`)
+            setAnalysisProgress({ visible: true, current: 0, status: '正在启动分析...' })
 
-            // 简单的状态检查，无进度条
+            // 使用进度API进行状态检查
             const checkSingleProgress = async () => {
                 try {
-                    const jr = await fetch(`/api/v1/jobs/${js.job_id}`)
-                    if (jr.ok) {
-                        const jobStatus = await jr.json()
-                        if (jobStatus.status === 'completed') {
+                    // 使用新的进度API
+                    const progressResp = await fetch(`/api/v1/progress/${js.job_id}`)
+                    if (progressResp.ok) {
+                        const progressData = await progressResp.json()
+
+                        // 更新进度信息
+                        setAnalysisProgress({
+                            visible: true,
+                            current: progressData.progress_percentage || 0,
+                            status: progressData.status,
+                            currentBatch: progressData.current_batch,
+                            totalBatches: progressData.total_batches,
+                            currentModel: progressData.current_model,
+                            elapsedTime: progressData.elapsed_time,
+                            estimatedRemaining: progressData.estimated_remaining,
+                            errorMessage: progressData.error_message
+                        })
+
+                        if (progressData.status === 'completed') {
+                            setAnalysisProgress(prev => ({ ...prev, visible: false }))
                             message.success(`运行 ${rel.split('/').pop()} 分析完成`)
                             runs.refetch()
                             analysisStatus.refetch()
-                        } else if (jobStatus.status === 'failed') {
-                            message.error(`运行 ${rel.split('/').pop()} 分析失败: ${jobStatus.error || '未知错误'}`)
-                        } else {
-                            setTimeout(checkSingleProgress, 3000)
+                            setCurrentJobId(null)
+                            return
+                        } else if (progressData.status === 'failed') {
+                            setAnalysisProgress(prev => ({ ...prev, visible: false }))
+                            message.error(`运行 ${rel.split('/').pop()} 分析失败: ${progressData.error_message || '未知错误'}`)
+                            setCurrentJobId(null)
+                            return
+                        }
+                    } else {
+                        // 回退到旧的任务API
+                        const jr = await fetch(`/api/v1/jobs/${js.job_id}`)
+                        if (jr.ok) {
+                            const jobStatus = await jr.json()
+                            if (jobStatus.status === 'completed') {
+                                setAnalysisProgress({ visible: false, current: 100 })
+                                message.success(`运行 ${rel.split('/').pop()} 分析完成`)
+                                runs.refetch()
+                                analysisStatus.refetch()
+                                setCurrentJobId(null)
+                                return
+                            } else if (jobStatus.status === 'failed') {
+                                setAnalysisProgress({ visible: false, current: 0 })
+                                message.error(`运行 ${rel.split('/').pop()} 分析失败: ${jobStatus.error || '未知错误'}`)
+                                setCurrentJobId(null)
+                                return
+                            } else {
+                                setAnalysisProgress({ visible: true, current: 50, status: '正在分析中...' })
+                            }
                         }
                     }
+                    setTimeout(checkSingleProgress, 2000)
                 } catch (e) {
                     console.warn('检查单个分析进度失败:', e)
+                    setTimeout(checkSingleProgress, 3000)
                 }
             }
-            setTimeout(checkSingleProgress, 2000)
+            setTimeout(checkSingleProgress, 1000)
         } catch (e) {
             message.error('启动单个分析失败：' + String(e))
+            setAnalysisProgress({ visible: false, current: 0 })
         }
     }
 
@@ -746,7 +838,7 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                     </Space>
 
                     <Table
-                        dataSource={(runs.data?.runs || []).map((r, idx) => ({ key: `${r.rel}-${idx}`, ...r }))}
+                        dataSource={(runs.data?.runs || []).map((r: any, idx: number) => ({ key: `${r.rel}-${idx}`, ...r }))}
                         size="small"
                         loading={runs.isLoading}
                         onChange={(pg, _filters, sorter: any) => {
@@ -810,23 +902,125 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
 
             {/* 分析进度条 */}
             {analysisProgress.visible && (
-                <Card>
+                <Card style={{ marginBottom: 16, border: '1px solid #1890ff' }}>
                     <Space direction="vertical" style={{ width: '100%' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span>分析进度:</span>
-                            <Progress percent={analysisProgress.current} style={{ flex: 1 }} />
-                            {analysisProgress.total != null && (
-                                <span style={{ minWidth: 120, textAlign: 'right', color: '#666' }}>
-                                    {Math.min(analysisProgress.current, 99)}% ({Math.min(analysisProgress.total || 0, Math.max(analysisProgress.current, 0))}/{analysisProgress.total})
-                                </span>
-                            )}
+                        <div style={{ fontSize: 18, fontWeight: 600, color: '#1890ff' }}>
+                            🤖 AI智能分析进度
+                        </div>
+
+                        {/* 批次信息突出显示 */}
+                        {analysisProgress.currentBatch != null && analysisProgress.totalBatches != null && analysisProgress.totalBatches > 0 && (
+                            <div style={{
+                                fontSize: 16,
+                                fontWeight: 500,
+                                padding: '8px 12px',
+                                background: '#e6f7ff',
+                                borderRadius: 4,
+                                marginBottom: 8
+                            }}>
+                                📊 批次 {analysisProgress.currentBatch}/{analysisProgress.totalBatches} 正在分析...
+                            </div>
+                        )}
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                            <Progress
+                                percent={Math.round(analysisProgress.current || 0)}
+                                style={{ flex: 1 }}
+                                status={analysisProgress.status === 'failed' ? 'exception' : 'active'}
+                                strokeColor={{
+                                    '0%': '#108ee9',
+                                    '100%': '#87d068',
+                                }}
+                                format={percent => {
+                                    if (analysisProgress.currentBatch && analysisProgress.totalBatches) {
+                                        return `${percent}%`
+                                    }
+                                    return `${percent}%`
+                                }}
+                            />
                             {currentJobId && <Button size="small" danger onClick={() => {
                                 setAnalysisProgress({ visible: false, current: 0 })
                                 setCurrentJobId(null)
                                 message.info('已取消监控')
                             }}>取消监控</Button>}
                         </div>
-                        {analysisProgress.status && <div style={{ color: '#666', fontSize: '12px' }}>{analysisProgress.status}</div>}
+
+                        {/* 详细信息 */}
+                        <div style={{
+                            background: '#f0f2f5',
+                            padding: '12px',
+                            borderRadius: 4,
+                            marginTop: 12
+                        }}>
+                            <Row gutter={[24, 12]}>
+                                {analysisProgress.currentModel && (
+                                    <Col span={12}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <span style={{ color: '#666', fontSize: 14 }}>模型：</span>
+                                            <Tag color="blue" style={{ margin: 0, fontSize: 14 }}>
+                                                {analysisProgress.currentModel}
+                                            </Tag>
+                                        </div>
+                                    </Col>
+                                )}
+                                {analysisProgress.current != null && (
+                                    <Col span={12}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <span style={{ color: '#666', fontSize: 14 }}>进度：</span>
+                                            <span style={{ fontWeight: 600, fontSize: 14 }}>
+                                                {Math.round(analysisProgress.current)}%
+                                            </span>
+                                        </div>
+                                    </Col>
+                                )}
+                                {analysisProgress.elapsedTime != null && (
+                                    <Col span={12}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <span style={{ color: '#666', fontSize: 14 }}>已用时间：</span>
+                                            <span style={{ fontWeight: 500, fontSize: 14 }}>
+                                                {Math.round(analysisProgress.elapsedTime)}秒
+                                            </span>
+                                        </div>
+                                    </Col>
+                                )}
+                                {analysisProgress.estimatedRemaining != null && analysisProgress.estimatedRemaining > 0 && (
+                                    <Col span={12}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <span style={{ color: '#666', fontSize: 14 }}>预计剩余：</span>
+                                            <span style={{ fontWeight: 500, fontSize: 14 }}>
+                                                {Math.round(analysisProgress.estimatedRemaining)}秒
+                                            </span>
+                                        </div>
+                                    </Col>
+                                )}
+                            </Row>
+                        </div>
+
+                        {analysisProgress.status && (
+                            <div style={{ color: '#666', fontSize: 12, marginTop: 8 }}>
+                                状态: {
+                                    analysisProgress.status === 'running' ? '正在分析中...' :
+                                        analysisProgress.status === 'completed' ? '✅ 分析完成' :
+                                            analysisProgress.status === 'failed' ? '❌ 分析失败' :
+                                                analysisProgress.status === 'pending' ? '准备中...' :
+                                                    analysisProgress.status
+                                }
+                            </div>
+                        )}
+
+                        {analysisProgress.errorMessage && (
+                            <div style={{
+                                marginTop: 8,
+                                padding: 8,
+                                background: '#fff2f0',
+                                border: '1px solid #ffccc7',
+                                borderRadius: 4,
+                                color: '#ff4d4f',
+                                fontSize: 12
+                            }}>
+                                错误: {analysisProgress.errorMessage}
+                            </div>
+                        )}
                     </Space>
                 </Card>
             )}

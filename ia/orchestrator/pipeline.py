@@ -94,7 +94,7 @@ def _normalize_k2_anomalies(items: list[dict[str, Any]]) -> list[dict[str, Any]]
     return normalized
 
 
-def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_existing: bool = True) -> tuple[list[dict[str, Any]], dict]:
+def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_existing: bool = True, job_id: str = None) -> tuple[list[dict[str, Any]], dict]:
     meta = read_json(os.path.join(run_dir, "meta.json"))
     entries = read_jsonl(os.path.join(run_dir, "ub.jsonl"))
 
@@ -142,13 +142,24 @@ def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_exis
             import time
             time.sleep(2.0)
             try:
-                result = provider.analyze(
-                    run_id=os.path.basename(run_dir),
-                    group_id=str(gid),
-                    entries=[{**e, "features": features.get("::".join(
-                        [e.get("suite", ""), e.get("case", ""), e.get("metric", "")]))} for e in ents],
-                    history=hist_map,
-                )
+                # 如果provider是K2Client，传递job_id
+                if job_id and hasattr(provider, 'analyze'):
+                    result = provider.analyze(
+                        run_id=os.path.basename(run_dir),
+                        group_id=str(gid),
+                        entries=[{**e, "features": features.get("::".join(
+                            [e.get("suite", ""), e.get("case", ""), e.get("metric", "")]))} for e in ents],
+                        history=hist_map,
+                        job_id=job_id
+                    )
+                else:
+                    result = provider.analyze(
+                        run_id=os.path.basename(run_dir),
+                        group_id=str(gid),
+                        entries=[{**e, "features": features.get("::".join(
+                            [e.get("suite", ""), e.get("case", ""), e.get("metric", "")]))} for e in ents],
+                        history=hist_map,
+                    )
                 anomalies.extend(_normalize_k2_anomalies(
                     result.get("anomalies", [])))
             except Exception as e:
@@ -170,10 +181,27 @@ def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_exis
     enabled = bool(provider and provider.enabled())
     # 如果AI失败并fallback到启发式算法，标记为降级模式
     actual_degraded = (not enabled) or ai_analysis_failed
-    actual_engine = "heuristic" if actual_degraded else (
-        provider.name() if enabled else "heuristic")
-    actual_version = "n/a" if actual_degraded else (
-        provider.version() if enabled else "n/a")
+
+    # 从分析结果中获取实际使用的模型
+    if anomalies and len(anomalies) > 0:
+        # 检查是否有模型信息在结果中
+        if hasattr(anomalies, '__iter__') and isinstance(anomalies[0], dict):
+            # 从第一个异常中尝试获取模型信息（如果有的话）
+            pass
+
+    # 从summary中获取模型信息（如果存在）
+    actual_model = summ.get("analysis_model", "")
+    model_name = summ.get("model_name", "")
+
+    if actual_model and actual_model != "heuristic":
+        actual_engine = actual_model
+        actual_version = model_name if model_name else actual_model
+    elif actual_degraded:
+        actual_engine = "heuristic"
+        actual_version = "n/a"
+    else:
+        actual_engine = provider.name() if enabled else "heuristic"
+        actual_version = provider.version() if enabled else "n/a"
 
     summ["analysis_engine"] = {
         "name": actual_engine,

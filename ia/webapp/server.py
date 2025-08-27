@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ..config import load_env_config
 from ..analyzer.k2_client import K2Client
+from ..analyzer.progress_tracker import get_tracker
 from ..orchestrator.pipeline import reanalyze_missing
 from ..interfaces.http_utils import json_with_cache
 from ..domain.models import DefectAnnotation
@@ -35,7 +36,7 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 _jobs_lock = threading.Lock()
 _jobs: Dict[str, Dict[str, Any]] = {}
-_pool = ThreadPoolExecutor(max_workers=2)
+_pool = ThreadPoolExecutor(max_workers=24)
 
 # 简易内存缓存（TTL）
 _cache: Dict[str, Dict[str, Any]] = {}
@@ -239,6 +240,39 @@ def api_series_alias(request: Request, metric: str = Query("System Benchmarks In
 
 
 # 已完成迁移，移除 legacy 端点 /api/anomalies/summary
+
+
+@app.get("/api/v1/progress/{job_id}")
+def api_get_progress(job_id: str):
+    """获取分析任务进度"""
+    tracker = get_tracker()
+    progress = tracker.get_progress(job_id)
+
+    if not progress:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Job not found", "job_id": job_id}
+        )
+
+    return JSONResponse(content=progress.to_dict())
+
+
+@app.get("/api/v1/progress")
+def api_list_progress():
+    """获取所有活动任务的进度"""
+    tracker = get_tracker()
+    all_progress = tracker.get_all_progress()
+
+    # 清理旧任务
+    tracker.cleanup_old(max_age_seconds=3600)
+
+    # 转换为列表格式
+    progress_list = [info.to_dict() for info in all_progress.values()]
+
+    return JSONResponse(content={
+        "jobs": progress_list,
+        "total": len(progress_list)
+    })
 
 
 @app.get("/api/v1/anomalies/summary")
@@ -718,8 +752,9 @@ def reanalyze_single_run(
         use_k2 = k2 if (k2 and k2.enabled()) else None
         no_fallback = False
 
-    def _work():
-        from ..orchestrator.pipeline import reanalyze_runs_by_criteria
+    def _work_with_progress(job_id):
+        from ..orchestrator.pipeline import analyze_run, parse_run
+        from ..analyzer.progress_tracker import get_tracker
         import requests
         import os
 
@@ -728,16 +763,31 @@ def reanalyze_single_run(
         if not os.path.isdir(run_dir):
             return {"error": f"运行不存在: {rel_path}"}
 
-        # 构造单个运行的数据
-        run_data = {"rel": rel_path}
+        # 更新进度状态
+        tracker = get_tracker()
+        tracker.update_progress(job_id, status="running",
+                                details={"run": rel_path, "engine": engine})
 
-        # 执行分析
-        done = reanalyze_runs_by_criteria(
-            ARCHIVE_ROOT,
-            runs=[run_data],
-            k2=use_k2,
-            force=True
-        )
+        try:
+            # 检查是否需要解析
+            ub_path = os.path.join(run_dir, "ub.jsonl")
+            if not os.path.exists(ub_path) or os.path.getsize(ub_path) == 0:
+                parse_run(run_dir)
+
+            # 执行分析，传递job_id
+            analyze_run(run_dir, use_k2, ARCHIVE_ROOT,
+                        reuse_existing=False, job_id=job_id)
+
+            done = [rel_path]
+
+            # 更新进度为完成
+            tracker.update_progress(job_id, status="completed",
+                                    current_batch=1, total_batches=1)
+        except Exception as e:
+            # 更新进度为失败
+            tracker.update_progress(job_id, status="failed",
+                                    error_message=str(e))
+            done = []
 
         # 更新分析状态
         try:
@@ -753,8 +803,18 @@ def reanalyze_single_run(
 
         return {"processed": len(done), "runs": done, "rel": rel_path}
 
-    job_id = _start_job(_work)
-    return {"job_id": job_id, "rel": rel_path}
+    # 创建进度跟踪
+    import uuid
+    from ..analyzer.progress_tracker import get_tracker
+    tracker = get_tracker()
+    job_id = uuid.uuid4().hex[:12]
+    progress_info = tracker.create_job(job_id, total_batches=1)
+    print(f"Created job {job_id} with progress tracking")
+
+    # 启动任务
+    _pool.submit(_work_with_progress, job_id)
+
+    return {"job_id": job_id, "rel": rel_path, "progress_url": f"/api/v1/progress/{job_id}"}
 
 
 @app.post("/api/v1/actions/crawl-data")
