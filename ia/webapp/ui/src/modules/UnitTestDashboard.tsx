@@ -80,6 +80,7 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
     const [crawlForm] = Form.useForm()
     const [analysisForm] = Form.useForm()
     const [currentJobId, setCurrentJobId] = useState<string | null>(null)
+    const [singleAnalysisLoading, setSingleAnalysisLoading] = useState<string | null>(null)
 
     // 构建查询URL
     const runsUrl = useMemo(() => {
@@ -163,7 +164,25 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
         }
     }
 
-    const pollJobStatus = (jobId: string) => {
+    // 分析单个运行
+    const analyzeSingleRun = async (rel: string) => {
+        try {
+            setSingleAnalysisLoading(rel)
+            const data: JobResp = await postJSON(`/api/v1/unit/runs/${encodeURIComponent(rel)}/analyze`, {})
+
+            message.success('已开始分析单个测试运行')
+
+            // 轮询任务状态
+            pollJobStatus(data.job_id, () => {
+                setSingleAnalysisLoading(null)
+            })
+        } catch (error) {
+            message.error('分析失败: ' + String(error))
+            setSingleAnalysisLoading(null)
+        }
+    }
+
+    const pollJobStatus = (jobId: string, onComplete?: () => void) => {
         const interval = setInterval(async () => {
             try {
                 const resp = await fetch(`/api/v1/jobs/${jobId}`)
@@ -178,13 +197,16 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
                     summary.refetch()
                     trend.refetch()
                     failureDist.refetch()
+                    if (onComplete) onComplete()
                 } else if (data.status === 'failed') {
                     clearInterval(interval)
                     message.error('任务失败: ' + (data.error || '未知错误'))
+                    if (onComplete) onComplete()
                 }
             } catch (error) {
                 clearInterval(interval)
                 message.error('查询任务状态失败')
+                if (onComplete) onComplete()
             }
         }, 2000)
 
@@ -268,20 +290,50 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
             }
         },
         {
+            title: '分析状态',
+            key: 'analysis',
+            width: 100,
+            render: (r: any) => {
+                const analyzed = r.has_analysis || false
+                return analyzed ? (
+                    <Tag color="green" icon={<CheckCircleOutlined />}>
+                        已分析
+                    </Tag>
+                ) : (
+                    <Tag color="default">未分析</Tag>
+                )
+            }
+        },
+        {
             title: '操作',
             key: 'actions',
-            width: 100,
+            width: 180,
             fixed: 'right' as const,
-            render: (r: any) => (
-                <Button
-                    type="link"
-                    size="small"
-                    icon={<FileTextOutlined />}
-                    onClick={() => props.onOpenRun(r.rel)}
-                >
-                    查看详情
-                </Button>
-            )
+            render: (r: any) => {
+                const analyzed = r.has_analysis || false
+                const label = analyzed ? '重新分析' : '分析'
+                return (
+                    <Space size="small">
+                        <Button
+                            size="small"
+                            type={analyzed ? 'default' : 'primary'}
+                            icon={<ThunderboltOutlined />}
+                            onClick={() => analyzeSingleRun(r.rel)}
+                            loading={singleAnalysisLoading === r.rel}
+                        >
+                            {label}
+                        </Button>
+                        <Button
+                            type="link"
+                            size="small"
+                            icon={<FileTextOutlined />}
+                            onClick={() => props.onOpenRun(r.rel)}
+                        >
+                            详情
+                        </Button>
+                    </Space>
+                )
+            }
         }
     ]
 

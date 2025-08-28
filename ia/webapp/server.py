@@ -192,9 +192,9 @@ def api_unit_runs_v1(
     from ..utils.io import read_jsonl
     import os
 
-    # 使用单元测试的存档目录
-    archive_root_unit = os.path.join(
-        ARCHIVE_ROOT, "..", "unit") if "ub" in ARCHIVE_ROOT else "./archive/unit"
+    # 从配置获取正确的archive_root_unit
+    cfg = load_env_config(source_url=None, archive_root=None)
+    archive_root_unit = cfg.archive_root_unit or "./archive/unit"
     runs = collect_runs(archive_root_unit, start, end)
 
     # 过滤和处理
@@ -212,11 +212,17 @@ def api_unit_runs_v1(
             if patch_id and run.get("patch_id") != patch_id:
                 continue
 
+            # 检查是否有分析结果
+            anomaly_file = os.path.join(run["run_dir"], "anomalies.unit.jsonl")
+            has_analysis = os.path.exists(
+                anomaly_file) and os.path.getsize(anomaly_file) > 0
+
             # 添加单元测试特定字段
             run["total_tests"] = summary.get("total", 0)
             run["passed_tests"] = summary.get("passed", 0)
             run["failed_tests"] = summary.get("failed", 0)
             run["success_rate"] = summary.get("success_rate", 0)
+            run["has_analysis"] = has_analysis
 
             filtered_runs.append(run)
 
@@ -242,8 +248,9 @@ def api_unit_summary():
     from ..utils.io import read_jsonl
     import os
 
-    archive_root_unit = os.path.join(
-        ARCHIVE_ROOT, "..", "unit") if "ub" in ARCHIVE_ROOT else "./archive/unit"
+    # 从配置获取正确的archive_root_unit
+    cfg = load_env_config(source_url=None, archive_root=None)
+    archive_root_unit = cfg.archive_root_unit or "./archive/unit"
     runs = collect_runs(archive_root_unit, None, None)
 
     total_runs = 0
@@ -295,8 +302,9 @@ def api_unit_trend():
     import os
     from datetime import datetime, timedelta
 
-    archive_root_unit = os.path.join(
-        ARCHIVE_ROOT, "..", "unit") if "ub" in ARCHIVE_ROOT else "./archive/unit"
+    # 从配置获取正确的archive_root_unit
+    cfg = load_env_config(source_url=None, archive_root=None)
+    archive_root_unit = cfg.archive_root_unit or "./archive/unit"
 
     # 获取最近30天的数据
     cutoff = datetime.now() - timedelta(days=30)
@@ -354,8 +362,9 @@ def api_unit_failure_distribution():
     import os
     from collections import Counter
 
-    archive_root_unit = os.path.join(
-        ARCHIVE_ROOT, "..", "unit") if "ub" in ARCHIVE_ROOT else "./archive/unit"
+    # 从配置获取正确的archive_root_unit
+    cfg = load_env_config(source_url=None, archive_root=None)
+    archive_root_unit = cfg.archive_root_unit or "./archive/unit"
 
     # 获取最近7天的数据
     from datetime import datetime, timedelta
@@ -407,7 +416,7 @@ def api_unit_crawl(request: dict):
 
     def run_crawl():
         try:
-            cfg = load_env_config()
+            cfg = load_env_config(source_url=None, archive_root=None)
             if not cfg.source_url_unit:
                 raise ValueError("Unit test source URL not configured")
 
@@ -418,20 +427,33 @@ def api_unit_crawl(request: dict):
                 days
             )
 
+            # 解析爬取的数据
+            from ..orchestrator.pipeline import parse_run
+            parsed_count = 0
+            for run_dir in new_runs:
+                try:
+                    parse_run(run_dir)
+                    parsed_count += 1
+                except Exception as e:
+                    print(f"解析失败 {run_dir}: {e}")
+
             # 更新任务状态
-            job_status[job_id] = {
-                "status": "completed",
-                "result": f"获取了 {len(new_runs)} 个新的测试运行"
-            }
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "completed",
+                    "result": f"获取了 {len(new_runs)} 个新的测试运行，解析了 {parsed_count} 个"
+                }
         except Exception as e:
-            job_status[job_id] = {
-                "status": "failed",
-                "error": str(e)
-            }
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "failed",
+                    "error": str(e)
+                }
 
     # 在后台执行
-    executor.submit(run_crawl)
-    job_status[job_id] = {"status": "running"}
+    _pool.submit(run_crawl)
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "running"}
 
     return {"job_id": job_id}
 
@@ -441,6 +463,7 @@ def api_unit_analyze(request: dict):
     """触发单元测试AI分析"""
     from ..config import load_env_config
     from ..orchestrator.pipeline import parse_run, analyze_run
+    from ..analyzer.k2_client import K2Client
     from ..reporting.aggregate import collect_runs
     import uuid
     import os
@@ -452,7 +475,7 @@ def api_unit_analyze(request: dict):
 
     def run_analysis():
         try:
-            cfg = load_env_config()
+            cfg = load_env_config(source_url=None, archive_root=None)
             archive_root_unit = cfg.archive_root_unit or "./archive/unit"
 
             # 获取需要分析的运行
@@ -472,22 +495,26 @@ def api_unit_analyze(request: dict):
 
                 # 解析和分析
                 parse_run(run_dir)
-                analyze_run(run_dir, None, archive_root_unit)
+                k2 = K2Client(
+                    cfg.model) if cfg.model and cfg.model.enabled else None
+                analyze_run(run_dir, k2, archive_root_unit)
                 analyzed_count += 1
 
-            job_status[job_id] = {
+            _jobs[job_id] = {
                 "status": "completed",
                 "result": f"分析了 {analyzed_count} 个测试运行"
             }
         except Exception as e:
-            job_status[job_id] = {
-                "status": "failed",
-                "error": str(e)
-            }
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "failed",
+                    "error": str(e)
+                }
 
     # 在后台执行
-    executor.submit(run_analysis)
-    job_status[job_id] = {"status": "running"}
+    _pool.submit(run_analysis)
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "running"}
 
     return {"job_id": job_id}
 
@@ -499,8 +526,9 @@ def api_unit_detail(rel_path: str):
     from ..utils.io import read_json, read_jsonl
     import os
 
-    archive_root_unit = os.path.join(
-        ARCHIVE_ROOT, "..", "unit") if "ub" in ARCHIVE_ROOT else "./archive/unit"
+    # 从配置获取正确的archive_root_unit
+    cfg = load_env_config(source_url=None, archive_root=None)
+    archive_root_unit = cfg.archive_root_unit or "./archive/unit"
     run_dir = os.path.join(archive_root_unit, rel_path)
 
     if not os.path.exists(run_dir):
@@ -546,6 +574,55 @@ def api_unit_detail(rel_path: str):
     }
 
 
+@app.post("/api/v1/unit/runs/{rel_path:path}/analyze")
+def api_unit_analyze_single(rel_path: str):
+    """分析单个单元测试运行"""
+    from ..orchestrator.pipeline import analyze_run
+    from ..analyzer.k2_client import K2Client
+    import uuid
+    import os
+
+    job_id = str(uuid.uuid4())
+
+    def run_analysis():
+        try:
+            cfg = load_env_config(source_url=None, archive_root=None)
+            archive_root_unit = cfg.archive_root_unit or "./archive/unit"
+
+            # 构建完整路径
+            run_dir = os.path.join(archive_root_unit, rel_path)
+
+            if not os.path.exists(run_dir):
+                raise ValueError(f"Run directory not found: {run_dir}")
+
+            # 执行分析（需要K2客户端和archive_root）
+            k2 = K2Client(
+                cfg.model) if cfg.model and cfg.model.enabled else None
+            analyze_run(run_dir, k2, archive_root_unit)
+
+            # 更新任务状态
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "completed",
+                    "result": "分析完成"
+                }
+        except Exception as e:
+            import traceback
+            error_msg = f"{str(e)}\n{traceback.format_exc()}"
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "failed",
+                    "error": error_msg
+                }
+
+    # 在后台执行
+    _pool.submit(run_analysis)
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "running"}
+
+    return {"job_id": job_id}
+
+
 @app.post("/api/v1/unit/webhook")
 async def api_unit_webhook(request: Request):
     """单元测试Webhook接口
@@ -555,6 +632,7 @@ async def api_unit_webhook(request: Request):
     from ..config import load_env_config
     from ..fetcher.unit_test_crawler import crawl_unit_test_incremental
     from ..orchestrator.pipeline import parse_run, analyze_run
+    from ..analyzer.k2_client import K2Client
     import uuid
     import os
 
@@ -572,7 +650,7 @@ async def api_unit_webhook(request: Request):
 
     def run_webhook():
         try:
-            cfg = load_env_config()
+            cfg = load_env_config(source_url=None, archive_root=None)
             if not cfg.source_url_unit:
                 raise ValueError("Unit test source URL not configured")
 
@@ -600,10 +678,12 @@ async def api_unit_webhook(request: Request):
                 # 解析
                 parse_run(run_dir)
                 # AI分析
-                analyze_run(run_dir, None, cfg.archive_root_unit)
+                k2 = K2Client(
+                    cfg.model) if cfg.model and cfg.model.enabled else None
+                analyze_run(run_dir, k2, cfg.archive_root_unit)
                 analyzed_count += 1
 
-            job_status[job_id] = {
+            _jobs[job_id] = {
                 "status": "completed",
                 "result": {
                     "downloaded": len(new_runs),
@@ -613,14 +693,16 @@ async def api_unit_webhook(request: Request):
                 }
             }
         except Exception as e:
-            job_status[job_id] = {
-                "status": "failed",
-                "error": str(e)
-            }
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "failed",
+                    "error": str(e)
+                }
 
     # 在后台执行
-    executor.submit(run_webhook)
-    job_status[job_id] = {"status": "running"}
+    _pool.submit(run_webhook)
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "running"}
 
     return {
         "job_id": job_id,
