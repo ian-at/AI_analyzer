@@ -32,7 +32,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ARCHIVE_ROOT = os.environ.get("IA_ARCHIVE", "./archive")
+# 从配置文件或环境变量加载ARCHIVE_ROOT
+
+
+def _get_archive_root():
+    # 优先使用环境变量，然后使用配置文件
+    env_archive = os.environ.get("IA_ARCHIVE")
+    if env_archive:
+        return env_archive
+
+    # 尝试从配置文件读取
+    try:
+        import json
+        cfg_paths = ["./models_config.json",
+                     "../models_config.json", "../../models_config.json"]
+        for cfg_path in cfg_paths:
+            if os.path.exists(cfg_path):
+                with open(cfg_path, 'r', encoding='utf-8') as f:
+                    file_cfg = json.load(f)
+                    return file_cfg.get("ARCHIVE_ROOT", "./archive/ub")
+    except Exception:
+        pass
+
+    # 默认值
+    return "./archive/ub"
+
+
+ARCHIVE_ROOT = _get_archive_root()
 os.makedirs(ARCHIVE_ROOT, exist_ok=True)
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 

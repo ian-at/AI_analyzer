@@ -34,9 +34,11 @@ class ModelConfig:
 @dataclass
 class AppConfig:
     source_url: str
-    archive_root: str
-    days: int
-    model: ModelConfig
+    source_url_unit: str = ""
+    archive_root: str = ""
+    archive_root_unit: str = ""
+    days: int = 7
+    model: ModelConfig = None
 
 
 def load_env_config(
@@ -99,9 +101,18 @@ def load_env_config(
 
     # App 配置读取（CLI 参数为空时回退）
     source_url = source_url or os.environ.get("SOURCE_URL") or (file_cfg.get(
-        "SOURCE_URL") if file_cfg else None) or "http://10.42.39.161/results/"
+        "SOURCE_URL") if file_cfg else None) or "http://10.42.30.103/results/UnixBenchTest/"
+
+    # 单元测试配置
+    source_url_unit = os.environ.get("SOURCE_URL_UNIT") or (file_cfg.get(
+        "SOURCE_URL_UNIT") if file_cfg else None) or ""
+
     archive_root = archive_root or os.environ.get("ARCHIVE_ROOT") or (
-        file_cfg.get("ARCHIVE_ROOT") if file_cfg else None) or "./archive"
+        file_cfg.get("ARCHIVE_ROOT") if file_cfg else None) or "./archive/ub"
+
+    # 单元测试存档目录
+    archive_root_unit = os.environ.get("ARCHIVE_ROOT_UNIT") or (file_cfg.get(
+        "ARCHIVE_ROOT_UNIT") if file_cfg else None) or "./archive/unit"
     if days is None:
         days_val = os.environ.get("DAYS") or (
             file_cfg.get("DAYS") if file_cfg else None)
@@ -137,7 +148,9 @@ def load_env_config(
     )
     return AppConfig(
         source_url=source_url,
+        source_url_unit=source_url_unit,
         archive_root=archive_root,
+        archive_root_unit=archive_root_unit,
         days=days,
         model=model_cfg,
     )
