@@ -14,10 +14,13 @@ import requests
 from bs4 import BeautifulSoup
 
 
-DATE_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}/?$")
+DATE_DIR_RE = re.compile(r"^\d{4}-\d{1,2}-\d{1,2}/?$")  # 支持单数字月/日
 # 适配 unixbench-1867-1.html 格式（1867 为 patch_id，1 为 patch_set）
 HTML_NAME_RE = re.compile(
     r".*?-(?P<patch_id>\d+)-(?P<patch_set>\d+)\.html$", re.IGNORECASE)
+# 适配 unit-2248-1.log 格式（2248 为 patch_id，1 为 patch_set）
+UNIT_LOG_NAME_RE = re.compile(
+    r"unit-(?P<patch_id>\d+)-(?P<patch_set>\d+)\.log$", re.IGNORECASE)
 
 
 def ensure_dir(path: str) -> None:
@@ -95,11 +98,20 @@ def list_remote_date_dirs(base_url: str, max_age_days: int | None = None) -> lis
     cutoff = datetime.utcnow() - timedelta(days=max_age_days)
     filtered: list[str] = []
     for link in links:
-        m = re.search(r"(\d{4}-\d{2}-\d{2})/", link)
+        # 支持单数字和双数字的月份/日期格式
+        m = re.search(r"(\d{4}-\d{1,2}-\d{1,2})/", link)
         if not m:
             continue
         try:
-            dt = datetime.strptime(m.group(1), "%Y-%m-%d")
+            # 标准化日期格式后解析
+            date_str = m.group(1)
+            parts = date_str.split('-')
+            if len(parts) == 3:
+                year, month, day = parts
+                normalized_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+                dt = datetime.strptime(normalized_date, "%Y-%m-%d")
+            else:
+                continue
         except ValueError:
             continue
         if dt >= cutoff:
@@ -109,6 +121,14 @@ def list_remote_date_dirs(base_url: str, max_age_days: int | None = None) -> lis
 
 @dataclass
 class RemoteHtml:
+    url: str
+    name: str
+    patch_id: str
+    patch_set: str
+
+
+@dataclass
+class RemoteLog:
     url: str
     name: str
     patch_id: str
@@ -134,6 +154,29 @@ def list_remote_htmls(day_url: str) -> list[RemoteHtml]:
                 base = day_url
             full_url = base + name
             results.append(RemoteHtml(full_url, name, patch_id, patch_set))
+    return results
+
+
+def list_remote_logs(day_url: str) -> list[RemoteLog]:
+    """列出远程目录中的单元测试日志文件"""
+    resp = fetch_url(day_url)
+    soup = BeautifulSoup(resp.text, "html.parser")
+    results: list[RemoteLog] = []
+    for a in soup.find_all("a"):
+        href = a.get("href", "")
+        if href.lower().endswith(".log"):
+            name = href.split("/")[-1]
+            m = UNIT_LOG_NAME_RE.search(name)
+            if not m:
+                continue
+            patch_id = m.group("patch_id")
+            patch_set = m.group("patch_set")
+            if not day_url.endswith("/"):
+                base = day_url + "/"
+            else:
+                base = day_url
+            full_url = base + name
+            results.append(RemoteLog(full_url, name, patch_id, patch_set))
     return results
 
 
