@@ -8,6 +8,8 @@ from typing import Any
 from ..analyzer.anomaly import heuristic_anomalies, load_history_for_keys, compute_entry_features
 from ..analyzer.k2_client import K2Client
 from ..analyzer.model_provider import K2ProviderAdapter
+from ..analyzer.unit_test_analyzer import analyze_unit_test_anomalies
+from ..parser.unit_test_parser import get_test_summary, get_failed_test_cases
 from ..config import load_analysis_config
 from ..fetcher.crawler import crawl_incremental
 from ..parser.html_parser import parse_ub_html
@@ -111,7 +113,15 @@ def _normalize_k2_anomalies(items: list[dict[str, Any]]) -> list[dict[str, Any]]
 
 def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_existing: bool = True, job_id: str = None) -> tuple[list[dict[str, Any]], dict]:
     meta = read_json(os.path.join(run_dir, "meta.json"))
-    entries = read_jsonl(os.path.join(run_dir, "ub.jsonl"))
+    test_type = meta.get("test_type", "unixbench")
+
+    # 根据测试类型选择不同的数据文件
+    if test_type == "unit_test":
+        entries = read_jsonl(os.path.join(run_dir, "unit.jsonl"))
+        anomalies_file = "anomalies.unit.jsonl"
+    else:
+        entries = read_jsonl(os.path.join(run_dir, "ub.jsonl"))
+        anomalies_file = "anomalies.k2.jsonl"
 
     # 加载分析配置
     analysis_cfg = load_analysis_config()
@@ -129,8 +139,42 @@ def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_exis
     anomalies: list[dict[str, Any]] = []
     ai_analysis_failed = False  # 移到函数顶层，确保作用域正确
 
+    # 单元测试使用专门的分析逻辑
+    if test_type == "unit_test":
+        # 若已有单元测试结果且非空，直接复用
+        existing = read_jsonl(os.path.join(run_dir, anomalies_file))
+        if reuse_existing and existing:
+            summ = summarize(existing)
+            summ["analysis_engine"] = {
+                "name": "unit_test_analyzer",
+                "version": "1.0",
+                "degraded": False,
+            }
+            summ["analysis_time"] = datetime.utcnow().isoformat() + "Z"
+            write_json(os.path.join(run_dir, "summary.json"), summ)
+            generate_report(run_dir, meta, existing, summ)
+            return existing, summ
+
+        # 执行单元测试分析
+        test_summary = get_test_summary(entries)
+        anomalies = analyze_unit_test_anomalies(entries, test_summary)
+
+        # 保存分析结果
+        write_jsonl(os.path.join(run_dir, anomalies_file), anomalies)
+        summ = summarize(anomalies)
+        summ["analysis_engine"] = {
+            "name": "unit_test_analyzer",
+            "version": "1.0",
+            "degraded": False,
+        }
+        summ["analysis_time"] = datetime.utcnow().isoformat() + "Z"
+        write_json(os.path.join(run_dir, "summary.json"), summ)
+        generate_report(run_dir, meta, anomalies, summ)
+        return anomalies, summ
+
+    # UB测试的原有逻辑
     # 若已有 K2 结果且非空，直接复用，避免重复调用
-    existing = read_jsonl(os.path.join(run_dir, "anomalies.k2.jsonl"))
+    existing = read_jsonl(os.path.join(run_dir, anomalies_file))
     if reuse_existing and existing:
         # 复用已有结果，但仍更新 summary.json 与 report.html，且回填引擎信息
         summ = summarize(existing)
@@ -200,7 +244,7 @@ def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_exis
             entries, history, min_samples_for_anomaly=min_samples)
 
     # 保存异常结果与汇总
-    write_jsonl(os.path.join(run_dir, "anomalies.k2.jsonl"), anomalies)
+    write_jsonl(os.path.join(run_dir, anomalies_file), anomalies)
     summ = summarize(anomalies)
     # 写入分析引擎元数据，便于前端展示/筛选
     enabled = bool(provider and provider.enabled())
