@@ -1,12 +1,15 @@
 import React, { useMemo, useState } from 'react'
-import { Layout, Menu, ConfigProvider, Dropdown, Button, Modal, Form, Input, InputNumber, message, Card, Tabs, Space, Tag, Divider } from 'antd'
+import { Layout, Menu, ConfigProvider, Dropdown, Button, Modal, Form, Input, InputNumber, message, Card, Tabs, Space, Tag, Divider, Radio } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
-import { SettingOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons'
+import { SettingOutlined, PlusOutlined, DeleteOutlined, ExperimentOutlined, CodeOutlined, ApiOutlined, BarChartOutlined } from '@ant-design/icons'
 import { Dashboard } from './Dashboard'
 import { RunDetail } from './RunDetail'
+import { UnitTestDashboard } from './UnitTestDashboard'
+import { UnitTestDetail } from './UnitTestDetail'
 import { useScrollRestore } from '../hooks/useScrollRestore'
 
-type Page = 'dashboard' | 'run'
+type Page = 'dashboard' | 'run' | 'unit-dashboard' | 'unit-detail'
+type TestType = 'ub' | 'unit' | 'interface' | 'lb'
 
 async function getJSON<T>(url: string): Promise<T> {
     const r = await fetch(url)
@@ -31,15 +34,27 @@ export function App() {
     // 从URL读取初始状态
     const getInitialState = () => {
         const hash = window.location.hash.slice(1) // 移除 #
-        if (hash.startsWith('/run/')) {
-            const rel = decodeURIComponent(hash.slice(5)) // 移除 '/run/'
-            return { page: 'run' as Page, rel }
+
+        // 解析测试类型和页面
+        if (hash.startsWith('/unit/')) {
+            const subPath = hash.slice(6)
+            if (subPath.startsWith('detail/')) {
+                const rel = decodeURIComponent(subPath.slice(7))
+                return { page: 'unit-detail' as Page, rel, testType: 'unit' as TestType }
+            }
+            return { page: 'unit-dashboard' as Page, rel: '', testType: 'unit' as TestType }
+        } else if (hash.startsWith('/run/')) {
+            const rel = decodeURIComponent(hash.slice(5))
+            return { page: 'run' as Page, rel, testType: 'ub' as TestType }
+        } else if (hash === '/unit-dashboard') {
+            return { page: 'unit-dashboard' as Page, rel: '', testType: 'unit' as TestType }
         }
-        return { page: 'dashboard' as Page, rel: '' }
+        return { page: 'dashboard' as Page, rel: '', testType: 'ub' as TestType }
     }
 
     const [page, setPage] = useState<Page>(getInitialState().page)
     const [rel, setRel] = useState<string>(getInitialState().rel)
+    const [testType, setTestType] = useState<TestType>(getInitialState().testType)
 
     // 监听URL变化
     React.useEffect(() => {
@@ -47,6 +62,7 @@ export function App() {
             const state = getInitialState()
             setPage(state.page)
             setRel(state.rel)
+            setTestType(state.testType)
         }
 
         window.addEventListener('hashchange', handleHashChange)
@@ -61,11 +77,17 @@ export function App() {
     }, [])
 
     // 更新URL的辅助函数
-    const updateURL = (newPage: Page, newRel?: string) => {
-        if (newPage === 'dashboard') {
+    const updateURL = (newPage: Page, newRel?: string, newTestType?: TestType) => {
+        const type = newTestType || testType
+
+        if (newPage === 'dashboard' && type === 'ub') {
             window.location.hash = '#/dashboard'
-        } else if (newPage === 'run' && newRel) {
+        } else if (newPage === 'unit-dashboard' && type === 'unit') {
+            window.location.hash = '#/unit-dashboard'
+        } else if (newPage === 'run' && newRel && type === 'ub') {
             window.location.hash = `#/run/${encodeURIComponent(newRel)}`
+        } else if (newPage === 'unit-detail' && newRel && type === 'unit') {
+            window.location.hash = `#/unit/detail/${encodeURIComponent(newRel)}`
         }
     }
 
@@ -325,15 +347,36 @@ export function App() {
     ]
 
     const content = useMemo(() => {
-        if (page === 'dashboard') return <Dashboard onOpenRun={(r) => {
-            setRel(r);
-            setPage('run');
-            updateURL('run', r);
-        }} />
-        return <RunDetail rel={rel} onBack={() => {
-            setPage('dashboard');
-            updateURL('dashboard');
-        }} />
+        switch (page) {
+            case 'dashboard':
+                return <Dashboard onOpenRun={(r) => {
+                    setRel(r);
+                    setPage('run');
+                    updateURL('run', r);
+                }} />
+            case 'run':
+                return <RunDetail rel={rel} onBack={() => {
+                    setPage('dashboard');
+                    updateURL('dashboard');
+                }} />
+            case 'unit-dashboard':
+                return <UnitTestDashboard onOpenRun={(r) => {
+                    setRel(r);
+                    setPage('unit-detail');
+                    updateURL('unit-detail', r, 'unit');
+                }} />
+            case 'unit-detail':
+                return <UnitTestDetail rel={rel} onBack={() => {
+                    setPage('unit-dashboard');
+                    updateURL('unit-dashboard', '', 'unit');
+                }} />
+            default:
+                return <Dashboard onOpenRun={(r) => {
+                    setRel(r);
+                    setPage('run');
+                    updateURL('run', r);
+                }} />
+        }
     }, [page, rel])
 
     return (
@@ -343,7 +386,51 @@ export function App() {
         >
             <Layout style={{ minHeight: '100vh' }}>
                 <Layout.Header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ color: '#fff', fontWeight: 600 }}>X Core 智能分析平台</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+                        <div style={{ color: '#fff', fontWeight: 600 }}>X Core 智能分析平台</div>
+                        <Radio.Group
+                            value={testType}
+                            onChange={(e) => {
+                                const newType = e.target.value as TestType
+                                setTestType(newType)
+                                // 切换到对应的仪表板
+                                if (newType === 'ub') {
+                                    updateURL('dashboard', '', newType)
+                                } else if (newType === 'unit') {
+                                    updateURL('unit-dashboard', '', newType)
+                                } else {
+                                    message.info(`${newType === 'interface' ? '接口测试' : 'LB测试'}功能即将推出`)
+                                }
+                            }}
+                            buttonStyle="solid"
+                            size="small"
+                        >
+                            <Radio.Button value="ub">
+                                <Space size={4}>
+                                    <BarChartOutlined />
+                                    <span>UB测试</span>
+                                </Space>
+                            </Radio.Button>
+                            <Radio.Button value="unit">
+                                <Space size={4}>
+                                    <CodeOutlined />
+                                    <span>单元测试</span>
+                                </Space>
+                            </Radio.Button>
+                            <Radio.Button value="interface" disabled>
+                                <Space size={4}>
+                                    <ApiOutlined />
+                                    <span>接口测试</span>
+                                </Space>
+                            </Radio.Button>
+                            <Radio.Button value="lb" disabled>
+                                <Space size={4}>
+                                    <ExperimentOutlined />
+                                    <span>LB测试</span>
+                                </Space>
+                            </Radio.Button>
+                        </Radio.Group>
+                    </div>
                     <Dropdown
                         menu={{ items: menuItems }}
                         placement="bottomRight"

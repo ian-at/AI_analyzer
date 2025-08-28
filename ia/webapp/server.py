@@ -176,6 +176,460 @@ def get_job_legacy(job_id: str):
 # 已完成迁移，移除 legacy 端点 /api/runs
 
 
+@app.get("/api/v1/unit/runs")
+def api_unit_runs_v1(
+    page: int = Query(1),
+    page_size: int = Query(20),
+    test_type: str = Query("unit"),
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+    failed_only: bool = Query(False),
+    patch_id: str | None = Query(None)
+):
+    """获取单元测试运行列表"""
+    from ..reporting.aggregate import collect_runs
+    from ..parser.unit_test_parser import get_test_summary
+    from ..utils.io import read_jsonl
+    import os
+
+    # 使用单元测试的存档目录
+    archive_root_unit = os.path.join(
+        ARCHIVE_ROOT, "..", "unit") if "ub" in ARCHIVE_ROOT else "./archive/unit"
+    runs = collect_runs(archive_root_unit, start, end)
+
+    # 过滤和处理
+    filtered_runs = []
+    for run in runs:
+        # 读取单元测试数据
+        unit_file = os.path.join(run["run_dir"], "unit.jsonl")
+        if os.path.exists(unit_file):
+            records = read_jsonl(unit_file)
+            summary = get_test_summary(records)
+
+            # 应用过滤条件
+            if failed_only and summary.get("failed", 0) == 0:
+                continue
+            if patch_id and run.get("patch_id") != patch_id:
+                continue
+
+            # 添加单元测试特定字段
+            run["total_tests"] = summary.get("total", 0)
+            run["passed_tests"] = summary.get("passed", 0)
+            run["failed_tests"] = summary.get("failed", 0)
+            run["success_rate"] = summary.get("success_rate", 0)
+
+            filtered_runs.append(run)
+
+    # 分页
+    total = len(filtered_runs)
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    page_runs = filtered_runs[start_idx:end_idx]
+
+    return {
+        "runs": page_runs,
+        "page": page,
+        "page_size": page_size,
+        "total": total
+    }
+
+
+@app.get("/api/v1/unit/summary")
+def api_unit_summary():
+    """获取单元测试汇总统计"""
+    from ..reporting.aggregate import collect_runs
+    from ..parser.unit_test_parser import get_test_summary
+    from ..utils.io import read_jsonl
+    import os
+
+    archive_root_unit = os.path.join(
+        ARCHIVE_ROOT, "..", "unit") if "ub" in ARCHIVE_ROOT else "./archive/unit"
+    runs = collect_runs(archive_root_unit, None, None)
+
+    total_runs = 0
+    total_passed = 0
+    total_failed = 0
+    success_rates = []
+
+    for run in runs:
+        unit_file = os.path.join(run["run_dir"], "unit.jsonl")
+        if os.path.exists(unit_file):
+            records = read_jsonl(unit_file)
+            summary = get_test_summary(records)
+
+            total_runs += 1
+            if summary.get("failed", 0) == 0:
+                total_passed += 1
+            else:
+                total_failed += 1
+
+            success_rates.append(summary.get("success_rate", 0))
+
+    avg_success_rate = sum(success_rates) / \
+        len(success_rates) if success_rates else 0
+
+    # 判断趋势（简化版）
+    recent_trend = "stable"
+    if len(success_rates) >= 5:
+        recent = success_rates[-5:]
+        if recent[-1] > recent[0]:
+            recent_trend = "improving"
+        elif recent[-1] < recent[0]:
+            recent_trend = "declining"
+
+    return {
+        "total_runs": total_runs,
+        "total_passed": total_passed,
+        "total_failed": total_failed,
+        "average_success_rate": avg_success_rate,
+        "recent_trend": recent_trend
+    }
+
+
+@app.get("/api/v1/unit/trend")
+def api_unit_trend():
+    """获取单元测试成功率趋势"""
+    from ..reporting.aggregate import collect_runs
+    from ..parser.unit_test_parser import get_test_summary
+    from ..utils.io import read_jsonl
+    import os
+    from datetime import datetime, timedelta
+
+    archive_root_unit = os.path.join(
+        ARCHIVE_ROOT, "..", "unit") if "ub" in ARCHIVE_ROOT else "./archive/unit"
+
+    # 获取最近30天的数据
+    cutoff = datetime.now() - timedelta(days=30)
+    runs = collect_runs(archive_root_unit, cutoff.strftime('%Y-%m-%d'), None)
+
+    # 按日期分组
+    daily_stats = {}
+    for run in runs:
+        date = run.get("date", "").split("T")[0]  # 获取日期部分
+        if not date:
+            continue
+
+        unit_file = os.path.join(run["run_dir"], "unit.jsonl")
+        if os.path.exists(unit_file):
+            records = read_jsonl(unit_file)
+            summary = get_test_summary(records)
+
+            if date not in daily_stats:
+                daily_stats[date] = {
+                    "success_rates": [],
+                    "failed_counts": []
+                }
+
+            daily_stats[date]["success_rates"].append(
+                summary.get("success_rate", 0))
+            daily_stats[date]["failed_counts"].append(summary.get("failed", 0))
+
+    # 计算每天的平均值
+    dates = sorted(daily_stats.keys())
+    success_rates = []
+    failed_counts = []
+
+    for date in dates:
+        rates = daily_stats[date]["success_rates"]
+        fails = daily_stats[date]["failed_counts"]
+
+        avg_rate = sum(rates) / len(rates) if rates else 0
+        total_fails = sum(fails)
+
+        success_rates.append(avg_rate)
+        failed_counts.append(total_fails)
+
+    return {
+        "dates": dates,
+        "success_rates": success_rates,
+        "failed_counts": failed_counts
+    }
+
+
+@app.get("/api/v1/unit/failure-distribution")
+def api_unit_failure_distribution():
+    """获取单元测试失败分布"""
+    from ..reporting.aggregate import collect_runs
+    from ..utils.io import read_jsonl
+    import os
+    from collections import Counter
+
+    archive_root_unit = os.path.join(
+        ARCHIVE_ROOT, "..", "unit") if "ub" in ARCHIVE_ROOT else "./archive/unit"
+
+    # 获取最近7天的数据
+    from datetime import datetime, timedelta
+    cutoff = datetime.now() - timedelta(days=7)
+    runs = collect_runs(archive_root_unit, cutoff.strftime('%Y-%m-%d'), None)
+
+    # 统计失败测试的分类
+    failure_categories = Counter()
+
+    for run in runs:
+        anomalies_file = os.path.join(run["run_dir"], "anomalies.unit.jsonl")
+        if os.path.exists(anomalies_file):
+            anomalies = read_jsonl(anomalies_file)
+            for anomaly in anomalies:
+                # 从支持证据中获取测试分类
+                evidence = anomaly.get("supporting_evidence", {})
+                category = evidence.get("test_category", {})
+                component = category.get("component", "unknown")
+                failure_categories[component] += 1
+
+    # 转换为百分比
+    total = sum(failure_categories.values())
+    categories = []
+
+    for name, count in failure_categories.most_common(10):  # 只显示前10个
+        percentage = (count / total * 100) if total > 0 else 0
+        categories.append({
+            "name": name,
+            "count": count,
+            "percentage": round(percentage, 1)
+        })
+
+    return {
+        "categories": categories
+    }
+
+
+@app.post("/api/v1/unit/crawl")
+def api_unit_crawl(request: dict):
+    """触发单元测试数据获取"""
+    from ..config import load_env_config
+    from ..fetcher.unit_test_crawler import crawl_unit_test_incremental
+    import uuid
+
+    days = request.get("days", 7)
+    patch_id = request.get("patch_id")
+
+    job_id = str(uuid.uuid4())
+
+    def run_crawl():
+        try:
+            cfg = load_env_config()
+            if not cfg.source_url_unit:
+                raise ValueError("Unit test source URL not configured")
+
+            # 执行爬取
+            new_runs = crawl_unit_test_incremental(
+                cfg.source_url_unit,
+                cfg.archive_root_unit,
+                days
+            )
+
+            # 更新任务状态
+            job_status[job_id] = {
+                "status": "completed",
+                "result": f"获取了 {len(new_runs)} 个新的测试运行"
+            }
+        except Exception as e:
+            job_status[job_id] = {
+                "status": "failed",
+                "error": str(e)
+            }
+
+    # 在后台执行
+    executor.submit(run_crawl)
+    job_status[job_id] = {"status": "running"}
+
+    return {"job_id": job_id}
+
+
+@app.post("/api/v1/unit/analyze")
+def api_unit_analyze(request: dict):
+    """触发单元测试AI分析"""
+    from ..config import load_env_config
+    from ..orchestrator.pipeline import parse_run, analyze_run
+    from ..reporting.aggregate import collect_runs
+    import uuid
+    import os
+
+    days = request.get("days", 7)
+    force = request.get("force", False)
+
+    job_id = str(uuid.uuid4())
+
+    def run_analysis():
+        try:
+            cfg = load_env_config()
+            archive_root_unit = cfg.archive_root_unit or "./archive/unit"
+
+            # 获取需要分析的运行
+            from datetime import datetime, timedelta
+            cutoff = datetime.now() - timedelta(days=days)
+            runs = collect_runs(archive_root_unit,
+                                cutoff.strftime('%Y-%m-%d'), None)
+
+            analyzed_count = 0
+            for run in runs:
+                run_dir = run["run_dir"]
+
+                # 检查是否需要分析
+                anomalies_file = os.path.join(run_dir, "anomalies.unit.jsonl")
+                if not force and os.path.exists(anomalies_file):
+                    continue  # 已分析，跳过
+
+                # 解析和分析
+                parse_run(run_dir)
+                analyze_run(run_dir, None, archive_root_unit)
+                analyzed_count += 1
+
+            job_status[job_id] = {
+                "status": "completed",
+                "result": f"分析了 {analyzed_count} 个测试运行"
+            }
+        except Exception as e:
+            job_status[job_id] = {
+                "status": "failed",
+                "error": str(e)
+            }
+
+    # 在后台执行
+    executor.submit(run_analysis)
+    job_status[job_id] = {"status": "running"}
+
+    return {"job_id": job_id}
+
+
+@app.get("/api/v1/unit/detail/{rel_path:path}")
+def api_unit_detail(rel_path: str):
+    """获取单元测试详情"""
+    from ..parser.unit_test_parser import get_test_summary, get_failed_test_cases
+    from ..utils.io import read_json, read_jsonl
+    import os
+
+    archive_root_unit = os.path.join(
+        ARCHIVE_ROOT, "..", "unit") if "ub" in ARCHIVE_ROOT else "./archive/unit"
+    run_dir = os.path.join(archive_root_unit, rel_path)
+
+    if not os.path.exists(run_dir):
+        return JSONResponse(status_code=404, content={"error": "Run not found"})
+
+    # 读取各种数据文件
+    meta = read_json(os.path.join(run_dir, "meta.json"))
+    summary = read_json(os.path.join(run_dir, "summary.json")) if os.path.exists(
+        os.path.join(run_dir, "summary.json")) else {}
+
+    # 读取测试结果
+    unit_file = os.path.join(run_dir, "unit.jsonl")
+    test_results = []
+    test_summary = {}
+
+    if os.path.exists(unit_file):
+        records = read_jsonl(unit_file)
+        test_summary = get_test_summary(records)
+
+        # 提取测试用例结果
+        for record in records:
+            if record.get("case"):  # 只包含具体的测试用例
+                test_results.append({
+                    "case": record.get("case"),
+                    "status": record.get("status"),
+                    "value": record.get("value")
+                })
+
+    # 读取异常分析结果
+    anomalies = []
+    anomalies_file = os.path.join(run_dir, "anomalies.unit.jsonl")
+    if os.path.exists(anomalies_file):
+        anomalies = read_jsonl(anomalies_file)
+
+    return {
+        "run_dir": run_dir,
+        "rel": rel_path,
+        "meta": meta,
+        "summary": summary,
+        "test_results": test_results,
+        "test_summary": test_summary,
+        "anomalies": anomalies
+    }
+
+
+@app.post("/api/v1/unit/webhook")
+async def api_unit_webhook(request: Request):
+    """单元测试Webhook接口
+
+    触发单元测试数据的获取、解析和AI分析
+    """
+    from ..config import load_env_config
+    from ..fetcher.unit_test_crawler import crawl_unit_test_incremental
+    from ..orchestrator.pipeline import parse_run, analyze_run
+    import uuid
+    import os
+
+    try:
+        body = await request.json()
+    except:
+        body = {}
+
+    # 获取参数
+    patch_id = body.get("patch_id")
+    patch_set = body.get("patch_set")
+    days = body.get("days", 1)  # 默认只获取最近1天
+
+    job_id = str(uuid.uuid4())
+
+    def run_webhook():
+        try:
+            cfg = load_env_config()
+            if not cfg.source_url_unit:
+                raise ValueError("Unit test source URL not configured")
+
+            # 1. 获取数据
+            new_runs = crawl_unit_test_incremental(
+                cfg.source_url_unit,
+                cfg.archive_root_unit,
+                days
+            )
+
+            # 2. 筛选特定的patch
+            target_runs = []
+            if patch_id:
+                for run_path in new_runs:
+                    # 从路径中提取patch信息
+                    if f"_p{patch_id}" in run_path:
+                        if not patch_set or f"_ps{patch_set}" in run_path:
+                            target_runs.append(run_path)
+            else:
+                target_runs = new_runs
+
+            # 3. 解析和分析
+            analyzed_count = 0
+            for run_dir in target_runs:
+                # 解析
+                parse_run(run_dir)
+                # AI分析
+                analyze_run(run_dir, None, cfg.archive_root_unit)
+                analyzed_count += 1
+
+            job_status[job_id] = {
+                "status": "completed",
+                "result": {
+                    "downloaded": len(new_runs),
+                    "analyzed": analyzed_count,
+                    "patch_id": patch_id,
+                    "patch_set": patch_set
+                }
+            }
+        except Exception as e:
+            job_status[job_id] = {
+                "status": "failed",
+                "error": str(e)
+            }
+
+    # 在后台执行
+    executor.submit(run_webhook)
+    job_status[job_id] = {"status": "running"}
+
+    return {
+        "job_id": job_id,
+        "message": "Unit test analysis started",
+        "patch_id": patch_id,
+        "patch_set": patch_set
+    }
+
+
 @app.get("/api/v1/runs")
 def api_runs_v1(
     request: Request,
