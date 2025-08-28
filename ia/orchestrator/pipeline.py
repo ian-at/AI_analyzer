@@ -12,6 +12,7 @@ from ..config import load_analysis_config
 from ..fetcher.crawler import crawl_incremental
 from ..parser.html_parser import parse_ub_html
 from ..parser.unixbench_parser import parse_unixbench_pre_text
+from ..parser.unit_test_parser import parse_unit_test_log
 from ..reporting.report import generate_report
 from ..utils.io import read_json, read_jsonl, write_json, write_jsonl
 import glob
@@ -21,15 +22,28 @@ from datetime import datetime, timedelta
 
 def parse_run(run_dir: str) -> list[dict[str, Any]]:
     meta = read_json(os.path.join(run_dir, "meta.json"))
-    html_path = os.path.join(run_dir, "raw_html", meta["files"]["html"])
-    with open(html_path, "r", encoding="utf-8", errors="ignore") as f:
-        html_text = f.read()
-    # 优先尝试 UnixBench <pre> 文本解析
-    records = parse_unixbench_pre_text(html_text)
-    if not records:
-        # 回退到表格解析
-        records = parse_ub_html(html_text)
-    write_jsonl(os.path.join(run_dir, "ub.jsonl"), records)
+    test_type = meta.get("test_type", "unixbench")  # 默认为unixbench以保持向后兼容
+
+    if test_type == "unit_test":
+        # 解析单元测试日志
+        log_path = os.path.join(run_dir, "raw_logs", meta["files"]["log"])
+        with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+            log_text = f.read()
+        records = parse_unit_test_log(log_text)
+        # 保存为unit.jsonl以区别于ub.jsonl
+        write_jsonl(os.path.join(run_dir, "unit.jsonl"), records)
+    else:
+        # 解析UnixBench HTML (默认行为)
+        html_path = os.path.join(run_dir, "raw_html", meta["files"]["html"])
+        with open(html_path, "r", encoding="utf-8", errors="ignore") as f:
+            html_text = f.read()
+        # 优先尝试 UnixBench <pre> 文本解析
+        records = parse_unixbench_pre_text(html_text)
+        if not records:
+            # 回退到表格解析
+            records = parse_ub_html(html_text)
+        write_jsonl(os.path.join(run_dir, "ub.jsonl"), records)
+
     return records
 
 
