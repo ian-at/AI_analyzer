@@ -157,15 +157,36 @@ def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_exis
 
         # 执行单元测试分析
         test_summary = get_test_summary(entries)
-        anomalies = analyze_unit_test_anomalies(entries, test_summary)
+        anomalies, analysis_info = analyze_unit_test_anomalies(
+            entries, test_summary, k2)
+
+        # 确定分析引擎信息
+        failed_count = test_summary.get("failed", 0)
+        if failed_count > 0 and k2 and k2.enabled():
+            # 有失败测试且AI可用
+            if analysis_info.get("ai_analysis_success", False):
+                # AI分析成功，显示AI模型名称
+                engine_name = k2.get_model_name()
+                engine_version = "1.0"
+                degraded = False
+            else:
+                # AI分析失败，降级到规则分析
+                engine_name = "unit_test_analyzer"
+                engine_version = "1.0"
+                degraded = True
+        else:
+            # 无失败测试或AI不可用，使用规则分析
+            engine_name = "unit_test_analyzer"
+            engine_version = "1.0"
+            degraded = False
 
         # 保存分析结果
         write_jsonl(os.path.join(run_dir, anomalies_file), anomalies)
         summ = summarize(anomalies)
         summ["analysis_engine"] = {
-            "name": "unit_test_analyzer",
-            "version": "1.0",
-            "degraded": False,
+            "name": engine_name,
+            "version": engine_version,
+            "degraded": degraded,
         }
         summ["analysis_time"] = datetime.utcnow().isoformat() + "Z"
         write_json(os.path.join(run_dir, "summary.json"), summ)

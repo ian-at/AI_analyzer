@@ -295,6 +295,13 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
             width: 100,
             render: (r: any) => {
                 const analyzed = r.has_analysis || false
+                const successRate = r.success_rate || 0
+
+                // 如果成功率是100%，不显示分析状态
+                if (successRate >= 100) {
+                    return null
+                }
+
                 return analyzed ? (
                     <Tag color="green" icon={<CheckCircleOutlined />}>
                         已分析
@@ -312,17 +319,22 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
             render: (r: any) => {
                 const analyzed = r.has_analysis || false
                 const label = analyzed ? '重新分析' : '分析'
+                const successRate = r.success_rate || 0
+                const showAnalyzeButton = successRate < 100 // 只有成功率小于100%才显示分析按钮
+
                 return (
                     <Space size="small">
-                        <Button
-                            size="small"
-                            type={analyzed ? 'default' : 'primary'}
-                            icon={<ThunderboltOutlined />}
-                            onClick={() => analyzeSingleRun(r.rel)}
-                            loading={singleAnalysisLoading === r.rel}
-                        >
-                            {label}
-                        </Button>
+                        {showAnalyzeButton && (
+                            <Button
+                                size="small"
+                                type={analyzed ? 'default' : 'primary'}
+                                icon={<ThunderboltOutlined />}
+                                onClick={() => analyzeSingleRun(r.rel)}
+                                loading={singleAnalysisLoading === r.rel}
+                            >
+                                {label}
+                            </Button>
+                        )}
                         <Button
                             type="link"
                             size="small"

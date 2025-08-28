@@ -69,6 +69,8 @@ type UnitDetailResp = {
 
 export function UnitTestDetail(props: { rel: string, onBack: () => void }) {
     const [activeTab, setActiveTab] = useState<string>('summary')
+    const [pageSize, setPageSize] = useState<number>(20)
+    const [currentPage, setCurrentPage] = useState<number>(1)
 
     // 获取详情数据
     const detail = useQuery<UnitDetailResp>({
@@ -406,9 +408,14 @@ export function UnitTestDetail(props: { rel: string, onBack: () => void }) {
                         rowKey="case"
                         size="small"
                         pagination={{
-                            pageSize: 20,
+                            current: currentPage,
+                            pageSize: pageSize,
                             showSizeChanger: true,
-                            showTotal: (total) => `共 ${total} 个测试用例`
+                            showTotal: (total) => `共 ${total} 个测试用例`,
+                            onChange: (page, size) => {
+                                setCurrentPage(page)
+                                setPageSize(size || 20)
+                            }
                         }}
                         rowClassName={(record) => record.status === 'FAIL' ? 'ant-table-row-error' : ''}
                         style={{ marginTop: 16 }}

@@ -227,6 +227,21 @@ class K2Client:
     def enabled(self) -> bool:
         return len(self.models) > 0
 
+    def get_model_name(self) -> str:
+        """获取当前使用的AI模型名称"""
+        if not self.enabled():
+            return "no_model"
+
+        # 选择最佳可用模型
+        available = [m for m in self.models if m.enabled and m.error_count < 5]
+        if available:
+            # 按优先级排序，返回第一个模型的名称
+            available.sort(key=lambda x: x.priority)
+            return available[0].model
+
+        # 如果没有可用模型，返回第一个模型的名称
+        return self.models[0].model if self.models else "unknown_model"
+
     def _select_model(self) -> Optional[ModelEndpoint]:
         """选择最佳可用模型"""
         available = [m for m in self.models if m.enabled and m.error_count < 5]

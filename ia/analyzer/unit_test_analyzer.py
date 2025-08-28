@@ -9,53 +9,53 @@ from dataclasses import dataclass
 def categorize_test_by_name(test_name: str) -> Dict[str, str]:
     """根据测试用例名称推断测试类别和功能域"""
     categories = {
-        "component": "unknown",
-        "operation": "unknown",
-        "domain": "unknown"
+        "component": "未知组件",
+        "operation": "未知操作",
+        "domain": "未知域"
     }
 
     # 常见的测试组件模式
     component_patterns = {
-        "hyp": "hypervisor",
-        "vm": "virtual_machine",
-        "vcpu": "virtual_cpu",
-        "memory": "memory_management",
-        "mem": "memory_management",
-        "addr": "address_management",
-        "phys": "physical_memory",
-        "virt": "virtual_memory",
-        "page": "page_management",
-        "chunk": "memory_chunk",
-        "refcount": "reference_counting",
-        "ftrace": "function_tracing",
-        "event": "event_handling",
-        "buffer": "buffer_management",
-        "rb": "ring_buffer",
-        "sve": "scalable_vector_extension",
-        "nv": "nested_virtualization",
-        "pkvm": "protected_kvm"
+        "hyp": "虚拟化管理器",
+        "vm": "虚拟机",
+        "vcpu": "虚拟CPU",
+        "memory": "内存管理",
+        "mem": "内存管理",
+        "addr": "地址管理",
+        "phys": "物理内存",
+        "virt": "虚拟内存",
+        "page": "页面管理",
+        "chunk": "内存块",
+        "refcount": "引用计数",
+        "ftrace": "函数跟踪",
+        "event": "事件处理",
+        "buffer": "缓冲区管理",
+        "rb": "环形缓冲区",
+        "sve": "可扩展向量扩展",
+        "nv": "嵌套虚拟化",
+        "pkvm": "受保护KVM"
     }
 
     # 常见的操作模式
     operation_patterns = {
-        "basic": "basic_functionality",
-        "set": "setter_operation",
-        "get": "getter_operation",
-        "enable": "enable_operation",
-        "disable": "disable_operation",
-        "increment": "increment_operation",
-        "decrement": "decrement_operation",
-        "alignment": "alignment_check",
-        "arithmetic": "arithmetic_operation",
-        "comparison": "comparison_operation",
-        "assign": "assignment_operation",
-        "boundary": "boundary_condition",
-        "edge": "edge_case",
-        "null": "null_pointer_handling",
-        "range": "range_validation",
-        "error": "error_handling",
-        "reset": "reset_operation",
-        "calculation": "calculation_logic"
+        "basic": "基础功能",
+        "set": "设置操作",
+        "get": "获取操作",
+        "enable": "启用操作",
+        "disable": "禁用操作",
+        "increment": "递增操作",
+        "decrement": "递减操作",
+        "alignment": "对齐检查",
+        "arithmetic": "算术运算",
+        "comparison": "比较操作",
+        "assign": "赋值操作",
+        "boundary": "边界条件",
+        "edge": "边缘情况",
+        "null": "空指针处理",
+        "range": "范围验证",
+        "error": "错误处理",
+        "reset": "重置操作",
+        "calculation": "计算逻辑"
     }
 
     # 分析测试名称
@@ -75,15 +75,15 @@ def categorize_test_by_name(test_name: str) -> Dict[str, str]:
 
     # 识别功能域
     if any(x in test_lower for x in ["memory", "mem", "addr", "phys", "virt", "page", "chunk"]):
-        categories["domain"] = "memory_management"
+        categories["domain"] = "内存管理"
     elif any(x in test_lower for x in ["hyp", "vm", "vcpu", "pkvm"]):
-        categories["domain"] = "virtualization"
+        categories["domain"] = "虚拟化"
     elif any(x in test_lower for x in ["trace", "event", "buffer"]):
-        categories["domain"] = "tracing_events"
+        categories["domain"] = "跟踪事件"
     elif any(x in test_lower for x in ["sve", "vector"]):
-        categories["domain"] = "vector_processing"
+        categories["domain"] = "向量处理"
     elif any(x in test_lower for x in ["refcount", "atomic"]):
-        categories["domain"] = "synchronization"
+        categories["domain"] = "同步机制"
 
     return categories
 
@@ -293,8 +293,9 @@ def generate_unit_test_suggestions(
 
 def analyze_unit_test_anomalies(
     records: List[Dict[str, Any]],
-    test_summary: Dict[str, Any]
-) -> List[Dict[str, Any]]:
+    test_summary: Dict[str, Any],
+    k2_client=None
+) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """分析单元测试异常，生成AI分析结果"""
     anomalies = []
 
@@ -304,14 +305,30 @@ def analyze_unit_test_anomalies(
 
     if not failed_tests:
         # 没有失败的测试用例，返回空异常列表
-        return anomalies
+        return anomalies, {"ai_analysis_success": False}
 
     # 分析失败模式
     pattern_analysis = analyze_failure_patterns(failed_tests)
 
     # 生成根因分析
-    root_causes = generate_unit_test_root_causes(
-        failed_tests, pattern_analysis, test_summary)
+    root_causes = []
+    ai_analysis_success = False
+
+    if k2_client and k2_client.enabled():
+        try:
+            # 尝试使用AI增强分析
+            root_causes = generate_ai_enhanced_root_causes(
+                failed_tests, pattern_analysis, test_summary, k2_client)
+            ai_analysis_success = True
+        except Exception as e:
+            print(f"AI分析失败，降级到规则分析: {e}")
+            # AI分析失败，降级到基于规则的分析
+            root_causes = generate_unit_test_root_causes(
+                failed_tests, pattern_analysis, test_summary)
+    else:
+        # 使用基于规则的分析
+        root_causes = generate_unit_test_root_causes(
+            failed_tests, pattern_analysis, test_summary)
 
     # 生成检查建议
     suggestions = generate_unit_test_suggestions(failed_tests, root_causes)
@@ -329,10 +346,10 @@ def analyze_unit_test_anomalies(
         if len(failed_tests) >= test_summary.get("total", 1) * 0.5:
             severity = "high"
             confidence = 0.9
-        elif categories["operation"] in ["null_pointer_handling", "boundary_condition"]:
+        elif categories["operation"] in ["空指针处理", "边界条件"]:
             severity = "high"
             confidence = 0.85
-        elif categories["domain"] in ["memory_management", "virtualization"]:
+        elif categories["domain"] in ["内存管理", "虚拟化"]:
             severity = "medium"
             confidence = 0.8
         else:
@@ -360,7 +377,7 @@ def analyze_unit_test_anomalies(
 
         anomalies.append(anomaly)
 
-    return anomalies
+    return anomalies, {"ai_analysis_success": ai_analysis_success}
 
 
 # ========== 代码分析接口（预留给未来集成） ==========
@@ -647,7 +664,7 @@ def generate_name_based_suggestions(
         ])
 
     # 基于操作类型的建议
-    if operation == "assignment_operation":
+    if operation == "赋值操作":
         suggestions.extend([
             "检查赋值操作的类型兼容性",
             "验证赋值前后的值是否正确",
@@ -696,3 +713,215 @@ async def analyze_with_ai_model(
         "test_count": len(test_failures),
         "has_code_context": code_contexts is not None
     }
+
+
+def generate_ai_enhanced_root_causes(
+    failed_tests: List[Dict[str, Any]],
+    pattern_analysis: Dict[str, Any],
+    test_summary: Dict[str, Any],
+    k2_client
+) -> List[Dict[str, Any]]:
+    """
+    使用AI增强的根因分析
+
+    当前基于测试用例名称进行AI分析，未来会扩展到包含代码上下文
+    """
+    try:
+        # 准备AI分析的输入数据
+        test_names = [test.get("case", "") for test in failed_tests]
+        failure_rate = (test_summary.get("failed", 0) /
+                        max(test_summary.get("total", 1), 1)) * 100
+
+        # 构建AI分析提示
+        prompt = f"""
+分析以下单元测试失败情况：
+
+失败的测试用例：
+{', '.join(test_names)}
+
+失败统计：
+- 总测试数：{test_summary.get("total", 0)}
+- 失败数：{test_summary.get("failed", 0)}
+- 失败率：{failure_rate:.1f}%
+
+模式分析：
+{pattern_analysis.get("failure_patterns", [])}
+
+请基于测试用例名称分析可能的根本原因，并提供具体的修复建议。
+返回JSON格式，包含cause（原因）、likelihood（可能性0-1）、category（类别）字段。
+"""
+
+        # 调用AI模型进行真正的AI分析
+        ai_response = _call_ai_for_unit_test_analysis(
+            k2_client, prompt, test_names)
+
+        print(f"AI分析响应: {ai_response}")
+
+        if ai_response and "root_causes" in ai_response:
+            print(f"使用AI分析结果: {ai_response['root_causes']}")
+            return ai_response["root_causes"]
+        else:
+            print(f"AI响应格式不正确或为空: {ai_response}")
+            raise Exception("AI分析未返回有效的root_causes")
+
+    except Exception as e:
+        # AI分析失败时回退到规则分析
+        print(f"AI分析失败，回退到规则分析: {e}")
+
+    # 回退到基于规则的分析
+    return generate_unit_test_root_causes(failed_tests, pattern_analysis, test_summary)
+
+
+def _call_ai_for_unit_test_analysis(k2_client, prompt: str, test_names: List[str]) -> Dict[str, Any]:
+    """
+    调用AI模型进行单元测试分析
+
+    真正调用AI大模型进行分析，基于测试用例名称和失败模式
+    """
+    try:
+        # 直接调用AI模型，不使用K2Client的标准格式
+        # 因为K2Client是为性能测试设计的，我们需要直接调用模型
+
+        # 获取可用的模型
+        available_models = [
+            m for m in k2_client.models if m.enabled and m.error_count < 5]
+        if not available_models:
+            raise Exception("没有可用的AI模型")
+
+        # 选择优先级最高的模型
+        available_models.sort(key=lambda x: x.priority)
+        model = available_models[0]
+
+        print(f"正在调用AI模型 {model.name} 分析单元测试失败: {test_names}")
+
+        # 构建AI请求
+        url = model.api_base.rstrip("/") + "/chat/completions"
+        headers = {"Content-Type": "application/json"}
+
+        # 仅在有有效API_KEY时才添加Authorization头
+        if model.api_key and model.api_key.strip() and model.api_key.upper() != "EMPTY":
+            headers["Authorization"] = f"Bearer {model.api_key}"
+
+        # 构建单元测试专用的提示词
+        system_prompt = """你是一名内核单元测试分析专家。你将收到失败的单元测试用例信息，需要基于测试用例名称和失败模式进行根因分析。
+
+任务：识别单元测试失败的真正原因，并给出最可能的根因和具体的后续检查建议。
+
+准则：
+- 测试分类：根据测试用例名称推断测试的功能域（内存管理、虚拟化、跟踪事件、向量处理、同步机制等）和操作类型（基础功能、设置操作、获取操作、边界条件、错误处理等）。
+- 严重度评估：基于失败测试的功能重要性和影响范围确定严重度：高严重度（核心功能、内存安全、系统稳定性）、中等严重度（功能性错误、边界条件）、低严重度（边缘情况、非关键路径）。
+- 根因分析：每个失败测试必须给出 primary_reason 与至少一个 root_cause（含 likelihood 0~1），基于测试名称模式、功能域特征和常见失败原因进行推断。
+- 后续建议：每个异常必须在 suggested_next_checks 中提供3-5个具体可执行的检查建议，例如：『检查内核日志（dmesg）中是否存在相关错误信息』、『审查测试用例的具体实现代码』、『验证相关内核模块的加载状态』、『检查系统配置是否满足测试前提条件』、『运行相关的回归测试套件』等。
+- 置信度：每个异常项必须包含 confidence 字段（0~1之间的数值），基于测试名称的明确性和失败模式的典型性评估。
+- 环境：目标平台为 ARM64，Linux 内核 pKVM 场景（EL1/EL2）。常见单元测试失败原因包括：内存管理错误（页表配置、地址映射、内存分配）、虚拟化功能异常（EL2权限、hypervisor状态、VCPU管理）、同步机制问题（原子操作、引用计数、锁机制）、向量处理错误（SVE配置、寄存器状态）、跟踪功能异常（ftrace配置、事件处理、缓冲区管理）、边界条件处理（空指针、范围检查、溢出保护）等。
+- 模式识别：基于测试名称中的关键字（如 basic、boundary、edge、null、error、enable、disable、set、get 等）推断测试意图和可能的失败原因。
+- 语言：除专有名词外，所有自然语言字段请使用中文表达（含 primary_reason、root_causes.cause、suggested_next_checks 等）。
+- 输出：confidence 返回 0~1 的小数；严格按 JSON 输出，符合给定 schema，不要输出 Markdown 或解释文字。
+
+JSON输出格式：
+{
+    "anomalies": [
+        {
+            "suite": "UnitTest",
+            "case": "测试用例名",
+            "metric": "test_result", 
+            "severity": "high|medium|low",
+            "confidence": 0.0-1.0,
+            "primary_reason": "主要原因描述",
+            "supporting_evidence": {},
+            "root_causes": [
+                {
+                    "cause": "具体根因",
+                    "likelihood": 0.0-1.0
+                }
+            ],
+            "suggested_next_checks": ["检查步骤1", "检查步骤2", "检查步骤3"]
+        }
+    ]
+}"""
+
+        user_content = f"""请分析以下失败的单元测试用例：
+
+{prompt}
+
+失败的测试用例：{', '.join(test_names)}
+
+请基于测试用例名称和失败模式，分析可能的根本原因并提供具体的修复建议。"""
+
+        data = {
+            "model": model.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            "temperature": 0.2,
+        }
+
+        # 发送请求
+        import requests
+        resp = requests.post(url, headers=headers, json=data,
+                             timeout=model.timeout, verify=True)
+        resp.raise_for_status()
+
+        # 解析响应
+        js = resp.json()
+        content = js["choices"][0]["message"]["content"]
+
+        print(f"AI模型原始响应: {content}")
+
+        # 解析JSON响应
+        from ia.analyzer.k2_client import coerce_json_from_text
+        ai_result = coerce_json_from_text(content)
+
+        print(f"解析后的AI结果: {ai_result}")
+
+        # 转换为我们需要的格式
+        if ai_result and "anomalies" in ai_result:
+            root_causes = []
+            for anomaly in ai_result["anomalies"]:
+                # 从AI结果中提取根因
+                ai_root_causes = anomaly.get("root_causes", [])
+                if ai_root_causes:
+                    for ai_cause in ai_root_causes:
+                        root_cause = {
+                            "cause": ai_cause.get("cause", anomaly.get("primary_reason", "AI分析的根因")),
+                            "likelihood": ai_cause.get("likelihood", anomaly.get("confidence", 0.8)),
+                            "category": "AI分析",
+                            "ai_enhanced": True,
+                            "ai_details": {
+                                "severity": anomaly.get("severity", "medium"),
+                                "supporting_evidence": anomaly.get("supporting_evidence", {}),
+                                "suggested_checks": anomaly.get("suggested_next_checks", [])
+                            }
+                        }
+                        root_causes.append(root_cause)
+                else:
+                    # 如果没有具体的root_causes，使用primary_reason
+                    root_cause = {
+                        "cause": anomaly.get("primary_reason", "AI分析的根因"),
+                        "likelihood": anomaly.get("confidence", 0.8),
+                        "category": "AI分析",
+                        "ai_enhanced": True,
+                        "ai_details": {
+                            "severity": anomaly.get("severity", "medium"),
+                            "supporting_evidence": anomaly.get("supporting_evidence", {}),
+                            "suggested_checks": anomaly.get("suggested_next_checks", [])
+                        }
+                    }
+                    root_causes.append(root_cause)
+
+            # 更新模型统计
+            model.success_count += 1
+            model.error_count = max(0, model.error_count - 1)
+
+            return {"root_causes": root_causes}
+        else:
+            raise Exception("AI模型未返回有效的分析结果")
+
+    except Exception as e:
+        print(f"AI模型调用失败: {e}")
+        # 更新模型错误计数
+        if 'model' in locals():
+            model.error_count += 1
+        # 重新抛出异常，让上层处理降级
+        raise e
