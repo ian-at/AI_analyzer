@@ -824,7 +824,7 @@ JSON输出格式：
         {
             "suite": "UnitTest",
             "case": "测试用例名",
-            "metric": "test_result", 
+            "metric": "test_result",
             "severity": "high|medium|low",
             "confidence": 0.0-1.0,
             "primary_reason": "主要原因描述",

@@ -126,6 +126,12 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
         queryFn: () => getJSON<UnitFailureDistResp>('/api/v1/unit/failure-distribution')
     })
 
+    // 获取热力图数据
+    const heatmap = useQuery({
+        queryKey: ['unit-heatmap'],
+        queryFn: () => getJSON<{ items: Array<{ date: string, excellent: number, good: number, fair: number, poor: number }> }>('/api/v1/unit/heatmap')
+    })
+
     // 处理函数
     const handleCrawl = async () => {
         try {
@@ -207,6 +213,7 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
                     summary.refetch()
                     trend.refetch()
                     failureDist.refetch()
+                    heatmap.refetch()
                     if (onComplete) onComplete()
                 } else if (data.status === 'failed') {
                     clearInterval(interval)
@@ -981,71 +988,16 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
             <Row gutter={16} style={{ marginBottom: 16 }}>
                 <Col span={24}>
                     <ChartCard
-                        title="单元测试质量热力图（日期×成功率区间）"
+                        title="测试质量热力图（日期×成功率区间）"
                         option={{
-                            tooltip: {
-                                position: 'top',
-                                formatter: (params: any) => {
-                                    const { value } = params
-                                    const [dateIndex, rateIndex, count] = value
-                                    const date = trend.data?.dates[dateIndex] || ''
-                                    const rateRanges = ['优秀 (95-100%)', '良好 (90-95%)', '一般 (80-90%)', '较差 (<80%)']
-                                    const range = rateRanges[rateIndex] || ''
-                                    return `${dayjs(date).format('YYYY-MM-DD')}<br/>${range}<br/>运行次数: ${count}`
-                                }
-                            },
-                            grid: { height: '70%', top: '10%' },
-                            xAxis: {
-                                type: 'category',
-                                data: (trend.data?.dates || []).map(date => dayjs(date).format('MM-DD')),
-                                splitArea: { show: true }
-                            },
-                            yAxis: {
-                                type: 'category',
-                                data: ['优秀 (95-100%)', '良好 (90-95%)', '一般 (80-90%)', '较差 (<80%)'],
-                                splitArea: { show: true }
-                            },
-                            visualMap: {
-                                min: 0,
-                                max: Math.max(1, ...(trend.data?.success_rates || []).map(() => 1)), // 简化为0-1范围
-                                calculable: true,
-                                orient: 'horizontal',
-                                left: 'center',
-                                bottom: 0,
-                                inRange: {
-                                    color: ['#fff5f5', '#ffebee', '#ffcdd2', '#ef9a9a', '#e57373', '#ef5350', '#f44336']
-                                }
-                            },
-                            series: [{
-                                name: '测试质量',
-                                type: 'heatmap',
-                                data: (() => {
-                                    const dates = trend.data?.dates || []
-                                    const rates = trend.data?.success_rates || []
-                                    const result: [number, number, number][] = []
-
-                                    dates.forEach((date, dateIndex) => {
-                                        const rate = rates[dateIndex] || 0
-                                        // 根据成功率确定质量区间
-                                        let rateIndex = 3 // 默认较差
-                                        if (rate >= 95) rateIndex = 0      // 优秀
-                                        else if (rate >= 90) rateIndex = 1  // 良好  
-                                        else if (rate >= 80) rateIndex = 2  // 一般
-
-                                        result.push([dateIndex, rateIndex, 1])
-                                    })
-
-                                    return result
-                                })(),
-                                emphasis: {
-                                    itemStyle: {
-                                        shadowBlur: 10,
-                                        shadowColor: 'rgba(0,0,0,0.3)'
-                                    }
-                                }
-                            }]
+                            tooltip: { position: 'top' },
+                            grid: { height: '60%', top: '10%' },
+                            xAxis: { type: 'category', data: (heatmap.data?.items || []).map(i => dayjs(i.date).format('MM-DD')), splitArea: { show: true } },
+                            yAxis: { type: 'category', data: ['优秀', '良好', '一般', '较差'], splitArea: { show: true } },
+                            visualMap: { min: 0, max: Math.max(1, ...(heatmap.data?.items || []).map(i => Math.max(i.excellent || 0, i.good || 0, i.fair || 0, i.poor || 0))), calculable: true, orient: 'horizontal', left: 'center', bottom: 0 },
+                            series: [{ type: 'heatmap', data: (() => { const items = (heatmap.data?.items || []); const out: any[] = []; const ys = ['excellent', 'good', 'fair', 'poor']; items.forEach((d, xi) => { ys.forEach((y, yi) => { out.push([xi, yi, (d as any)[y] || 0]) }) }); return out })(), emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.3)' } } }]
                         }}
-                        height={200}
+                        height={280}
                     />
                 </Col>
             </Row>
@@ -1075,6 +1027,7 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
                                 summary.refetch()
                                 trend.refetch()
                                 failureDist.refetch()
+                                heatmap.refetch()
                             }}
                             loading={runs.isFetching}
                         >

@@ -378,6 +378,69 @@ def api_unit_trend():
     }
 
 
+@app.get("/api/v1/unit/heatmap")
+def api_unit_heatmap():
+    """获取单元测试热力图数据（日期×成功率区间）"""
+    from ..reporting.aggregate import collect_runs
+    from ..parser.unit_test_parser import get_test_summary
+    from ..utils.io import read_jsonl
+    import os
+    from datetime import datetime, timedelta
+
+    # 从配置获取正确的archive_root_unit
+    cfg = load_env_config(source_url=None, archive_root=None)
+    archive_root_unit = cfg.archive_root_unit or "./archive/unit"
+
+    # 获取最近30天的数据
+    cutoff = datetime.now() - timedelta(days=30)
+    runs = collect_runs(archive_root_unit, cutoff.strftime('%Y-%m-%d'), None)
+
+    # 按日期分组统计
+    daily_stats = {}
+    for run in runs:
+        date = run.get("date", "").split("T")[0]  # 获取日期部分
+        if not date:
+            continue
+
+        unit_file = os.path.join(run["run_dir"], "unit.jsonl")
+        if os.path.exists(unit_file):
+            records = read_jsonl(unit_file)
+            summary = get_test_summary(records)
+            rate = summary.get("success_rate", 0)
+
+            if date not in daily_stats:
+                daily_stats[date] = {
+                    "excellent": 0,  # 优秀 ≥95%
+                    "good": 0,       # 良好 90-95%
+                    "fair": 0,       # 一般 80-90%
+                    "poor": 0        # 较差 <80%
+                }
+
+            # 根据成功率分类
+            if rate >= 95:
+                daily_stats[date]["excellent"] += 1
+            elif rate >= 90:
+                daily_stats[date]["good"] += 1
+            elif rate >= 80:
+                daily_stats[date]["fair"] += 1
+            else:
+                daily_stats[date]["poor"] += 1
+
+    # 生成结果
+    items = []
+    for date in sorted(daily_stats.keys()):
+        stats = daily_stats[date]
+        items.append({
+            "date": date,
+            "excellent": stats["excellent"],
+            "good": stats["good"],
+            "fair": stats["fair"],
+            "poor": stats["poor"]
+        })
+
+    return {"items": items}
+
+
 @app.get("/api/v1/unit/failure-distribution")
 def api_unit_failure_distribution():
     """获取单元测试失败分布"""
