@@ -3,6 +3,7 @@ import { Card, Row, Col, Table, Tag, Space, Button, DatePicker, Select, Input, S
 import { useQuery } from '@tanstack/react-query'
 import { CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined, ReloadOutlined, SearchOutlined, FileTextOutlined, DownloadOutlined, ThunderboltOutlined, LineChartOutlined, BarChartOutlined, PieChartOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
+import { ChartCard } from '../components/ChartCard'
 
 async function getJSON<T>(url: string): Promise<T> {
     const r = await fetch(url)
@@ -52,6 +53,8 @@ type UnitTrendResp = {
     dates: string[]
     success_rates: number[]
     failed_counts: number[]
+    total_tests: number[]
+    passed_tests: number[]
 }
 
 type UnitFailureDistResp = {
@@ -396,162 +399,650 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
 
     return (
         <div style={{ padding: 24 }}>
-            {/* 暂时注释掉图表，避免错误
-            <Row gutter={16} style={{ marginBottom: 16 }}>
-                <Col span={14}>
-                    <ChartCard
-                        title="成功率趋势"
-                        loading={trend.isLoading}
-                        data={{
-                            labels: trend.data?.dates || [],
-                            datasets: [{
-                                label: '成功率 (%)',
-                                data: trend.data?.success_rates || [],
-                                borderColor: 'rgb(75, 192, 192)',
-                                backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                                tension: 0.1,
-                                fill: true
-                            }]
-                        }}
-                        options={{
-                            responsive: true,
-                            plugins: {
-                                legend: {
-                                    display: true,
-                                    position: 'top' as const
-                                },
-                                title: {
-                                    display: false
-                                },
-                                tooltip: {
-                                    callbacks: {
-                                        label: function (context: any) {
-                                            return `成功率: ${context.parsed.y?.toFixed(1)}%`
-                                        }
-                                    }
-                                }
-                            },
-                            scales: {
-                                y: {
-                                    beginAtZero: true,
-                                    max: 100,
-                                    ticks: {
-                                        callback: function (value: any) {
-                                            return value + '%'
-                                        }
-                                    }
-                                }
-                            }
-                        }}
-                    />
-                </Col>
-                <Col span={10}>
-                    <ChartCard
-                        title="失败分布 (最近7天)"
-                        loading={failureDist.isLoading}
-                        type="bar"
-                        data={{
-                            labels: failureDist.data?.categories.map(c => c.name) || [],
-                            datasets: [{
-                                label: '失败次数',
-                                data: failureDist.data?.categories.map(c => c.count) || [],
-                                backgroundColor: [
-                                    'rgba(255, 99, 132, 0.5)',
-                                    'rgba(255, 159, 64, 0.5)',
-                                    'rgba(255, 205, 86, 0.5)',
-                                    'rgba(75, 192, 192, 0.5)',
-                                    'rgba(54, 162, 235, 0.5)',
-                                    'rgba(153, 102, 255, 0.5)',
-                                    'rgba(201, 203, 207, 0.5)'
-                                ],
-                                borderColor: [
-                                    'rgb(255, 99, 132)',
-                                    'rgb(255, 159, 64)',
-                                    'rgb(255, 205, 86)',
-                                    'rgb(75, 192, 192)',
-                                    'rgb(54, 162, 235)',
-                                    'rgb(153, 102, 255)',
-                                    'rgb(201, 203, 207)'
-                                ],
-                                borderWidth: 1
-                            }]
-                        }}
-                        options={{
-                            responsive: true,
-                            plugins: {
-                                legend: {
-                                    display: false
-                                },
-                                title: {
-                                    display: false
-                                },
-                                tooltip: {
-                                    callbacks: {
-                                        afterLabel: function (context: any) {
-                                            const percentage = failureDist.data?.categories[context.dataIndex]?.percentage
-                                            return percentage ? `占比: ${percentage}%` : ''
-                                        }
-                                    }
-                                }
-                            },
-                            scales: {
-                                y: {
-                                    beginAtZero: true
-                                }
-                            }
-                        }}
-                    />
-                </Col>
-            </Row>
-            */}
-
-            {/* 统计卡片 */}
+            {/* 概览卡片 */}
             <Row gutter={16} style={{ marginBottom: 16 }}>
                 <Col span={6}>
-                    <Card size="small">
+                    <Card>
                         <Statistic
-                            title="总运行次数"
+                            title="总测试运行"
                             value={summary.data?.total_runs || 0}
-                            prefix={<FileTextOutlined />}
+                            suffix="次"
+                            valueStyle={{ color: '#1890ff' }}
+                            prefix={<BarChartOutlined />}
                         />
                     </Card>
                 </Col>
                 <Col span={6}>
-                    <Card size="small">
+                    <Card>
                         <Statistic
-                            title="全部通过"
+                            title="平均成功率"
+                            value={summary.data?.average_success_rate || 0}
+                            precision={1}
+                            suffix="%"
+                            valueStyle={{
+                                color: (summary.data?.average_success_rate || 0) >= 95 ? '#3f8600' :
+                                    (summary.data?.average_success_rate || 0) >= 90 ? '#faad14' : '#cf1322'
+                            }}
+                            prefix={<CheckCircleOutlined />}
+                        />
+                    </Card>
+                </Col>
+                <Col span={6}>
+                    <Card>
+                        <Statistic
+                            title="总通过测试"
                             value={summary.data?.total_passed || 0}
+                            suffix="个"
                             valueStyle={{ color: '#3f8600' }}
                             prefix={<CheckCircleOutlined />}
                         />
                     </Card>
                 </Col>
                 <Col span={6}>
-                    <Card size="small">
+                    <Card>
                         <Statistic
-                            title="存在失败"
+                            title="总失败测试"
                             value={summary.data?.total_failed || 0}
+                            suffix="个"
                             valueStyle={{ color: '#cf1322' }}
                             prefix={<CloseCircleOutlined />}
                         />
                     </Card>
                 </Col>
-                <Col span={6}>
-                    <Card size="small">
-                        <Statistic
-                            title="平均成功率"
-                            value={summary.data?.average_success_rate || 0}
-                            precision={1}
-                            suffix={
-                                <span style={{ fontSize: 14 }}>
-                                    % <span style={{ color: getTrendColor() }}>{getTrendIcon()}</span>
-                                </span>
+            </Row>
+
+            {/* 图表区域 */}
+            <Row gutter={16} style={{ marginBottom: 16 }}>
+                <Col span={12}>
+                    <ChartCard
+                        title={(() => {
+                            const trendData = trend.data?.success_rates || []
+                            if (trendData.length === 0) return "单元测试成功率趋势"
+                            const latest = trendData[trendData.length - 1]
+                            const previous = trendData.length > 1 ? trendData[trendData.length - 2] : latest
+                            const change = latest - previous
+                            const changeText = change > 0 ? `↑${change.toFixed(1)}%` : change < 0 ? `↓${Math.abs(change).toFixed(1)}%` : '持平'
+                            return `单元测试成功率趋势 (${changeText})`
+                        })()}
+                        option={{
+                            tooltip: {
+                                trigger: 'axis',
+                                formatter: (params: any) => {
+                                    const param = params[0]
+                                    const value = param.value
+                                    let quality = ''
+                                    if (value >= 95) quality = ' 🟢 优秀'
+                                    else if (value >= 90) quality = ' 🟡 良好'
+                                    else if (value >= 80) quality = ' 🟠 一般'
+                                    else quality = ' 🔴 需改进'
+                                    return `${param.name}<br/>成功率: ${value?.toFixed(1)}%${quality}`
+                                }
+                            },
+                            legend: {
+                                show: false
+                            },
+                            grid: { left: '3%', right: '15%', bottom: '3%', top: '5%', containLabel: true },
+                            xAxis: {
+                                type: 'category',
+                                data: trend.data?.dates || [],
+                                axisLabel: {
+                                    rotate: 45,
+                                    formatter: (value: string) => dayjs(value).format('MM-DD')
+                                }
+                            },
+                            yAxis: {
+                                type: 'value',
+                                min: 0,
+                                max: 100,
+                                axisLabel: {
+                                    formatter: '{value}%'
+                                },
+                                splitLine: {
+                                    show: true,
+                                    lineStyle: {
+                                        color: ['#f0f0f0']
+                                    }
+                                }
+                            },
+                            graphic: [
+                                // 简化的质量等级指示器
+                                {
+                                    type: 'group',
+                                    right: 15,
+                                    top: 50,
+                                    children: [
+                                        // 质量等级标题
+                                        {
+                                            type: 'text',
+                                            style: {
+                                                text: '质量等级',
+                                                x: 0, y: 0,
+                                                fontSize: 12,
+                                                fontWeight: 'bold',
+                                                fill: '#666'
+                                            }
+                                        },
+                                        // 优秀
+                                        {
+                                            type: 'circle',
+                                            shape: { cx: 5, cy: 25, r: 6 },
+                                            style: { fill: '#52c41a' }
+                                        },
+                                        {
+                                            type: 'text',
+                                            style: {
+                                                text: '优秀',
+                                                x: 18, y: 25,
+                                                textBaseline: 'middle',
+                                                fontSize: 11,
+                                                fill: '#333'
+                                            }
+                                        },
+                                        {
+                                            type: 'text',
+                                            style: {
+                                                text: '95%-100%',
+                                                x: 50, y: 25,
+                                                textBaseline: 'middle',
+                                                fontSize: 10,
+                                                fill: '#999'
+                                            }
+                                        },
+                                        // 良好
+                                        {
+                                            type: 'circle',
+                                            shape: { cx: 5, cy: 50, r: 6 },
+                                            style: { fill: '#faad14' }
+                                        },
+                                        {
+                                            type: 'text',
+                                            style: {
+                                                text: '良好',
+                                                x: 18, y: 50,
+                                                textBaseline: 'middle',
+                                                fontSize: 11,
+                                                fill: '#333'
+                                            }
+                                        },
+                                        {
+                                            type: 'text',
+                                            style: {
+                                                text: '90%-95%',
+                                                x: 50, y: 50,
+                                                textBaseline: 'middle',
+                                                fontSize: 10,
+                                                fill: '#999'
+                                            }
+                                        },
+                                        // 一般
+                                        {
+                                            type: 'circle',
+                                            shape: { cx: 5, cy: 75, r: 6 },
+                                            style: { fill: '#ff9c6e' }
+                                        },
+                                        {
+                                            type: 'text',
+                                            style: {
+                                                text: '一般',
+                                                x: 18, y: 75,
+                                                textBaseline: 'middle',
+                                                fontSize: 11,
+                                                fill: '#333'
+                                            }
+                                        },
+                                        {
+                                            type: 'text',
+                                            style: {
+                                                text: '80%-90%',
+                                                x: 50, y: 75,
+                                                textBaseline: 'middle',
+                                                fontSize: 10,
+                                                fill: '#999'
+                                            }
+                                        },
+                                        // 需改进
+                                        {
+                                            type: 'circle',
+                                            shape: { cx: 5, cy: 100, r: 6 },
+                                            style: { fill: '#ff4d4f' }
+                                        },
+                                        {
+                                            type: 'text',
+                                            style: {
+                                                text: '需改进',
+                                                x: 18, y: 100,
+                                                textBaseline: 'middle',
+                                                fontSize: 11,
+                                                fill: '#333'
+                                            }
+                                        },
+                                        {
+                                            type: 'text',
+                                            style: {
+                                                text: '<80%',
+                                                x: 60, y: 100,
+                                                textBaseline: 'middle',
+                                                fontSize: 10,
+                                                fill: '#999'
+                                            }
+                                        }
+                                    ]
+                                }
+                            ],
+                            series: [{
+                                name: '成功率',
+                                type: 'line',
+                                smooth: true,
+                                symbol: 'circle',
+                                symbolSize: 8,
+                                data: trend.data?.success_rates || [],
+                                lineStyle: {
+                                    width: 4,
+                                    color: {
+                                        type: 'linear',
+                                        x: 0, y: 0, x2: 1, y2: 0,
+                                        colorStops: [
+                                            { offset: 0, color: '#1890ff' },
+                                            { offset: 1, color: '#52c41a' }
+                                        ]
+                                    }
+                                },
+                                itemStyle: {
+                                    color: (params: any) => {
+                                        const value = params.value
+                                        if (value >= 95) return '#52c41a'  // 绿色 - 优秀
+                                        if (value >= 90) return '#faad14'  // 黄色 - 良好
+                                        if (value >= 80) return '#ff9c6e'  // 橙色 - 一般
+                                        return '#ff4d4f'  // 红色 - 需改进
+                                    }
+                                },
+                                areaStyle: {
+                                    color: {
+                                        type: 'linear',
+                                        x: 0, y: 0, x2: 0, y2: 1,
+                                        colorStops: [
+                                            { offset: 0, color: 'rgba(24, 144, 255, 0.2)' },
+                                            { offset: 1, color: 'rgba(24, 144, 255, 0.02)' }
+                                        ]
+                                    }
+                                }
+                            }]
+                        }}
+                        height={320}
+                    />
+                </Col>
+                <Col span={12}>
+                    <ChartCard
+                        title="测试分类失败分布"
+                        option={(() => {
+                            const categories = failureDist.data?.categories || []
+                            const hasFailures = categories.length > 0 && categories.some(cat => cat.count > 0)
+
+                            if (!hasFailures) {
+                                // 没有失败时显示友好的"全部通过"状态
+                                return {
+                                    graphic: [
+                                        {
+                                            type: 'group',
+                                            left: 'center',
+                                            top: 'center',
+                                            children: [
+                                                // 大的绿色圆圈
+                                                {
+                                                    type: 'circle',
+                                                    shape: { cx: 0, cy: 0, r: 60 },
+                                                    style: {
+                                                        fill: {
+                                                            type: 'radial',
+                                                            x: 0.5, y: 0.5, r: 0.5,
+                                                            colorStops: [
+                                                                { offset: 0, color: '#52c41a' },
+                                                                { offset: 1, color: '#389e0d' }
+                                                            ]
+                                                        },
+                                                        shadowBlur: 20,
+                                                        shadowColor: 'rgba(82, 196, 26, 0.3)'
+                                                    }
+                                                },
+                                                // 对勾图标
+                                                {
+                                                    type: 'text',
+                                                    style: {
+                                                        text: '✓',
+                                                        x: 0, y: 0,
+                                                        textAlign: 'center',
+                                                        textBaseline: 'middle',
+                                                        fontSize: 40,
+                                                        fontWeight: 'bold',
+                                                        fill: '#fff'
+                                                    }
+                                                },
+                                                // "全部通过"文字
+                                                {
+                                                    type: 'text',
+                                                    style: {
+                                                        text: '全部通过',
+                                                        x: 0, y: 80,
+                                                        textAlign: 'center',
+                                                        textBaseline: 'middle',
+                                                        fontSize: 16,
+                                                        fontWeight: 'bold',
+                                                        fill: '#52c41a'
+                                                    }
+                                                },
+                                                // "无失败测试"说明文字
+                                                {
+                                                    type: 'text',
+                                                    style: {
+                                                        text: '无失败测试',
+                                                        x: 0, y: 100,
+                                                        textAlign: 'center',
+                                                        textBaseline: 'middle',
+                                                        fontSize: 12,
+                                                        fill: '#999'
+                                                    }
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            } else {
+                                // 有失败时显示正常的饼图
+                                return {
+                                    tooltip: {
+                                        trigger: 'item',
+                                        formatter: (params: any) => {
+                                            const { name, value, percent } = params
+                                            return `${name}<br/>失败次数: ${value} 次<br/>占比: ${percent}%`
+                                        }
+                                    },
+                                    legend: {
+                                        type: 'scroll',
+                                        orient: 'vertical',
+                                        right: 10,
+                                        top: 20,
+                                        bottom: 20
+                                    },
+                                    series: [{
+                                        name: '失败分布',
+                                        type: 'pie',
+                                        radius: ['40%', '70%'],
+                                        center: ['40%', '50%'],
+                                        avoidLabelOverlap: false,
+                                        label: {
+                                            show: false,
+                                            position: 'center'
+                                        },
+                                        emphasis: {
+                                            label: {
+                                                show: true,
+                                                fontSize: 16,
+                                                fontWeight: 'bold'
+                                            }
+                                        },
+                                        labelLine: { show: false },
+                                        data: categories.map((cat, index) => ({
+                                            value: cat.count,
+                                            name: cat.name,
+                                            itemStyle: {
+                                                color: [
+                                                    '#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57',
+                                                    '#ff9ff3', '#54a0ff', '#5f27cd', '#00d2d3', '#ff9f43'
+                                                ][index % 10]
+                                            }
+                                        }))
+                                    }]
+                                }
                             }
-                            valueStyle={{
-                                color: (summary.data?.average_success_rate || 0) >= 90 ? '#3f8600' : '#cf1322'
-                            }}
-                        />
-                    </Card>
+                        })()}
+                        height={320}
+                    />
+                </Col>
+            </Row>
+
+            {/* 第二行图表 */}
+            <Row gutter={16} style={{ marginBottom: 16 }}>
+                <Col span={8}>
+                    <ChartCard
+                        title="测试执行量趋势"
+                        option={{
+                            tooltip: {
+                                trigger: 'axis',
+                                formatter: (params: any) => {
+                                    const param = params[0]
+                                    return `${param.name}<br/>测试数量: ${param.value} 个`
+                                }
+                            },
+                            grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+                            xAxis: {
+                                type: 'category',
+                                data: trend.data?.dates || [],
+                                axisLabel: {
+                                    rotate: 45,
+                                    formatter: (value: string) => dayjs(value).format('MM-DD')
+                                }
+                            },
+                            yAxis: {
+                                type: 'value',
+                                axisLabel: {
+                                    formatter: '{value}'
+                                }
+                            },
+                            series: [{
+                                name: '测试总数',
+                                type: 'bar',
+                                data: trend.data?.total_tests || [],
+                                itemStyle: {
+                                    color: {
+                                        type: 'linear',
+                                        x: 0, y: 0, x2: 0, y2: 1,
+                                        colorStops: [
+                                            { offset: 0, color: '#1890ff' },
+                                            { offset: 1, color: '#40a9ff' }
+                                        ]
+                                    }
+                                },
+                                emphasis: {
+                                    itemStyle: { color: '#096dd9' }
+                                }
+                            }]
+                        }}
+                        height={280}
+                    />
+                </Col>
+                <Col span={8}>
+                    <ChartCard
+                        title="通过/失败对比"
+                        option={{
+                            tooltip: {
+                                trigger: 'axis',
+                                formatter: (params: any) => {
+                                    let result = `${params[0].name}<br/>`
+                                    params.forEach((param: any) => {
+                                        result += `${param.seriesName}: ${param.value} 个<br/>`
+                                    })
+                                    return result
+                                }
+                            },
+                            legend: {
+                                data: ['通过', '失败'],
+                                top: 10
+                            },
+                            grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+                            xAxis: {
+                                type: 'category',
+                                data: trend.data?.dates || [],
+                                axisLabel: {
+                                    rotate: 45,
+                                    formatter: (value: string) => dayjs(value).format('MM-DD')
+                                }
+                            },
+                            yAxis: {
+                                type: 'value'
+                            },
+                            series: [
+                                {
+                                    name: '通过',
+                                    type: 'bar',
+                                    stack: 'total',
+                                    data: trend.data?.passed_tests || [],
+                                    itemStyle: { color: '#52c41a' }
+                                },
+                                {
+                                    name: '失败',
+                                    type: 'bar',
+                                    stack: 'total',
+                                    data: trend.data?.failed_counts || [],
+                                    itemStyle: { color: '#ff4d4f' }
+                                }
+                            ]
+                        }}
+                        height={280}
+                    />
+                </Col>
+                <Col span={8}>
+                    <ChartCard
+                        title="质量趋势指标"
+                        option={{
+                            tooltip: {
+                                trigger: 'axis'
+                            },
+                            legend: {
+                                data: ['成功率', '稳定性指数'],
+                                top: 10
+                            },
+                            grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+                            xAxis: {
+                                type: 'category',
+                                data: trend.data?.dates || [],
+                                axisLabel: {
+                                    rotate: 45,
+                                    formatter: (value: string) => dayjs(value).format('MM-DD')
+                                }
+                            },
+                            yAxis: [
+                                {
+                                    type: 'value',
+                                    name: '成功率 (%)',
+                                    min: 0,
+                                    max: 100,
+                                    axisLabel: {
+                                        formatter: '{value}%'
+                                    }
+                                },
+                                {
+                                    type: 'value',
+                                    name: '稳定性',
+                                    min: 0,
+                                    max: 10,
+                                    axisLabel: {
+                                        formatter: '{value}'
+                                    }
+                                }
+                            ],
+                            series: [
+                                {
+                                    name: '成功率',
+                                    type: 'line',
+                                    yAxisIndex: 0,
+                                    data: trend.data?.success_rates || [],
+                                    smooth: true,
+                                    lineStyle: { width: 3, color: '#52c41a' },
+                                    itemStyle: { color: '#52c41a' }
+                                },
+                                {
+                                    name: '稳定性指数',
+                                    type: 'line',
+                                    yAxisIndex: 1,
+                                    data: (trend.data?.success_rates || []).map((rate, index, arr) => {
+                                        // 计算稳定性指数：基于成功率的变化幅度
+                                        if (index === 0) return 8
+                                        const change = Math.abs(rate - arr[index - 1])
+                                        return Math.max(1, 10 - change * 2) // 变化越小，稳定性越高
+                                    }),
+                                    smooth: true,
+                                    lineStyle: { width: 2, color: '#1890ff', type: 'dashed' },
+                                    itemStyle: { color: '#1890ff' }
+                                }
+                            ]
+                        }}
+                        height={280}
+                    />
+                </Col>
+            </Row>
+
+
+
+            {/* 测试质量热力图 */}
+            <Row gutter={16} style={{ marginBottom: 16 }}>
+                <Col span={24}>
+                    <ChartCard
+                        title="单元测试质量热力图（日期×成功率区间）"
+                        option={{
+                            tooltip: {
+                                position: 'top',
+                                formatter: (params: any) => {
+                                    const { value } = params
+                                    const [dateIndex, rateIndex, count] = value
+                                    const date = trend.data?.dates[dateIndex] || ''
+                                    const rateRanges = ['优秀 (95-100%)', '良好 (90-95%)', '一般 (80-90%)', '较差 (<80%)']
+                                    const range = rateRanges[rateIndex] || ''
+                                    return `${dayjs(date).format('YYYY-MM-DD')}<br/>${range}<br/>运行次数: ${count}`
+                                }
+                            },
+                            grid: { height: '70%', top: '10%' },
+                            xAxis: {
+                                type: 'category',
+                                data: (trend.data?.dates || []).map(date => dayjs(date).format('MM-DD')),
+                                splitArea: { show: true }
+                            },
+                            yAxis: {
+                                type: 'category',
+                                data: ['优秀 (95-100%)', '良好 (90-95%)', '一般 (80-90%)', '较差 (<80%)'],
+                                splitArea: { show: true }
+                            },
+                            visualMap: {
+                                min: 0,
+                                max: Math.max(1, ...(trend.data?.success_rates || []).map(() => 1)), // 简化为0-1范围
+                                calculable: true,
+                                orient: 'horizontal',
+                                left: 'center',
+                                bottom: 0,
+                                inRange: {
+                                    color: ['#fff5f5', '#ffebee', '#ffcdd2', '#ef9a9a', '#e57373', '#ef5350', '#f44336']
+                                }
+                            },
+                            series: [{
+                                name: '测试质量',
+                                type: 'heatmap',
+                                data: (() => {
+                                    const dates = trend.data?.dates || []
+                                    const rates = trend.data?.success_rates || []
+                                    const result: [number, number, number][] = []
+
+                                    dates.forEach((date, dateIndex) => {
+                                        const rate = rates[dateIndex] || 0
+                                        // 根据成功率确定质量区间
+                                        let rateIndex = 3 // 默认较差
+                                        if (rate >= 95) rateIndex = 0      // 优秀
+                                        else if (rate >= 90) rateIndex = 1  // 良好  
+                                        else if (rate >= 80) rateIndex = 2  // 一般
+
+                                        result.push([dateIndex, rateIndex, 1])
+                                    })
+
+                                    return result
+                                })(),
+                                emphasis: {
+                                    itemStyle: {
+                                        shadowBlur: 10,
+                                        shadowColor: 'rgba(0,0,0,0.3)'
+                                    }
+                                }
+                            }]
+                        }}
+                        height={200}
+                    />
                 </Col>
             </Row>
 

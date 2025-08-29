@@ -253,9 +253,9 @@ def api_unit_summary():
     archive_root_unit = cfg.archive_root_unit or "./archive/unit"
     runs = collect_runs(archive_root_unit, None, None)
 
-    total_runs = 0
-    total_passed = 0
-    total_failed = 0
+    total_runs_count = 0  # 运行记录总数
+    total_test_cases_passed = 0  # 测试用例通过总数
+    total_test_cases_failed = 0  # 测试用例失败总数
     success_rates = []
 
     for run in runs:
@@ -264,12 +264,9 @@ def api_unit_summary():
             records = read_jsonl(unit_file)
             summary = get_test_summary(records)
 
-            total_runs += 1
-            if summary.get("failed", 0) == 0:
-                total_passed += 1
-            else:
-                total_failed += 1
-
+            total_runs_count += 1
+            total_test_cases_passed += summary.get("passed", 0)
+            total_test_cases_failed += summary.get("failed", 0)
             success_rates.append(summary.get("success_rate", 0))
 
     avg_success_rate = sum(success_rates) / \
@@ -285,9 +282,9 @@ def api_unit_summary():
             recent_trend = "declining"
 
     return {
-        "total_runs": total_runs,
-        "total_passed": total_passed,
-        "total_failed": total_failed,
+        "total_runs": total_runs_count,
+        "total_passed": total_test_cases_passed,  # 现在是测试用例总数
+        "total_failed": total_test_cases_failed,  # 现在是测试用例总数
         "average_success_rate": avg_success_rate,
         "recent_trend": recent_trend
     }
@@ -325,32 +322,46 @@ def api_unit_trend():
             if date not in daily_stats:
                 daily_stats[date] = {
                     "success_rates": [],
-                    "failed_counts": []
+                    "failed_counts": [],
+                    "total_counts": [],
+                    "passed_counts": []
                 }
 
             daily_stats[date]["success_rates"].append(
                 summary.get("success_rate", 0))
             daily_stats[date]["failed_counts"].append(summary.get("failed", 0))
+            daily_stats[date]["total_counts"].append(summary.get("total", 0))
+            daily_stats[date]["passed_counts"].append(summary.get("passed", 0))
 
     # 计算每天的平均值
     dates = sorted(daily_stats.keys())
     success_rates = []
     failed_counts = []
+    total_counts = []
+    passed_counts = []
 
     for date in dates:
         rates = daily_stats[date]["success_rates"]
         fails = daily_stats[date]["failed_counts"]
+        totals = daily_stats[date]["total_counts"]
+        passeds = daily_stats[date]["passed_counts"]
 
         avg_rate = sum(rates) / len(rates) if rates else 0
         total_fails = sum(fails)
+        total_tests = sum(totals)
+        total_passed = sum(passeds)
 
         success_rates.append(avg_rate)
         failed_counts.append(total_fails)
+        total_counts.append(total_tests)
+        passed_counts.append(total_passed)
 
     return {
         "dates": dates,
         "success_rates": success_rates,
-        "failed_counts": failed_counts
+        "failed_counts": failed_counts,
+        "total_tests": total_counts,
+        "passed_tests": passed_counts
     }
 
 
