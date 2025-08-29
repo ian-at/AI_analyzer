@@ -1310,6 +1310,28 @@ def action_reanalyze_all_missing(engine: str = Query("auto", description="分析
     return {"job_id": job_id}
 
 
+@app.get("/api/v1/ui-config")
+def api_ui_config():
+    """获取UI配置"""
+    from ..utils.io import read_json
+    import os
+
+    config_file = os.path.join(os.path.dirname(os.path.dirname(
+        os.path.dirname(__file__))), "models_config.json")
+
+    try:
+        config = read_json(config_file)
+        ui_config = config.get("ui", {})
+        return {
+            "show_config_menu": ui_config.get("show_config_menu", False)
+        }
+    except Exception as e:
+        # 如果配置读取失败，默认不显示配置菜单
+        return {
+            "show_config_menu": False
+        }
+
+
 @app.get("/api/v1/analysis/status")
 def get_analysis_status():
     """获取最后分析状态信息"""

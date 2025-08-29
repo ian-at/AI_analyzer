@@ -30,6 +30,10 @@ async function postJSON<T>(url: string, data: any): Promise<T> {
     return r.json()
 }
 
+interface UIConfig {
+    show_config_menu: boolean
+}
+
 export function App() {
     // 从URL读取初始状态
     const getInitialState = () => {
@@ -76,6 +80,22 @@ export function App() {
         }
     }, [])
 
+    // 获取UI配置
+    React.useEffect(() => {
+        const fetchUIConfig = async () => {
+            try {
+                const config = await getJSON<UIConfig>('/api/v1/ui-config')
+                setUIConfig(config)
+            } catch (error) {
+                console.warn('获取UI配置失败，使用默认配置:', error)
+                // 使用默认配置（不显示配置菜单）
+                setUIConfig({ show_config_menu: false })
+            }
+        }
+
+        fetchUIConfig()
+    }, [])
+
     // 更新URL的辅助函数
     const updateURL = (newPage: Page, newRel?: string, newTestType?: TestType) => {
         const type = newTestType || testType
@@ -100,6 +120,9 @@ export function App() {
         parsed_config: Record<string, string>
         structured_config: Array<{ key: string, label: string, value: string, type: 'text' | 'number' | 'textarea' }>
     }>({ system_prompt: '', parsed_config: {}, structured_config: [] })
+
+    // UI配置状态
+    const [uiConfig, setUIConfig] = useState<UIConfig>({ show_config_menu: false })
 
     // 启用滚动位置恢复
     useScrollRestore()
@@ -431,15 +454,17 @@ export function App() {
                             </Radio.Button>
                         </Radio.Group>
                     </div>
-                    <Dropdown
-                        menu={{ items: menuItems }}
-                        placement="bottomRight"
-                        trigger={['click']}
-                    >
-                        <Button type="text" icon={<SettingOutlined />} style={{ color: '#fff' }}>
-                            配置
-                        </Button>
-                    </Dropdown>
+                    {uiConfig.show_config_menu && (
+                        <Dropdown
+                            menu={{ items: menuItems }}
+                            placement="bottomRight"
+                            trigger={['click']}
+                        >
+                            <Button type="text" icon={<SettingOutlined />} style={{ color: '#fff' }}>
+                                配置
+                            </Button>
+                        </Dropdown>
+                    )}
                 </Layout.Header>
                 <Layout.Content style={{ padding: 16 }}>
                     {content}
