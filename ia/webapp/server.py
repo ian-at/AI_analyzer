@@ -497,7 +497,8 @@ def api_unit_analyze(request: dict):
                 parse_run(run_dir)
                 k2 = K2Client(
                     cfg.model) if cfg.model and cfg.model.enabled else None
-                analyze_run(run_dir, k2, archive_root_unit)
+                analyze_run(run_dir, k2, archive_root_unit,
+                            reuse_existing=True)
                 analyzed_count += 1
 
             _jobs[job_id] = {
@@ -576,7 +577,7 @@ def api_unit_detail(rel_path: str):
 
 @app.post("/api/v1/unit/runs/{rel_path:path}/analyze")
 def api_unit_analyze_single(rel_path: str):
-    """分析单个单元测试运行"""
+    """分析单个单元测试运行（如果已分析则跳过）"""
     from ..orchestrator.pipeline import analyze_run
     from ..analyzer.k2_client import K2Client
     import uuid
@@ -598,7 +599,7 @@ def api_unit_analyze_single(rel_path: str):
             # 执行分析（需要K2客户端和archive_root）
             k2 = K2Client(
                 cfg.model) if cfg.model and cfg.model.enabled else None
-            analyze_run(run_dir, k2, archive_root_unit)
+            analyze_run(run_dir, k2, archive_root_unit, reuse_existing=True)
 
             # 更新任务状态
             with _jobs_lock:
@@ -617,6 +618,59 @@ def api_unit_analyze_single(rel_path: str):
 
     # 在后台执行
     _pool.submit(run_analysis)
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "running"}
+
+    return {"job_id": job_id}
+
+
+@app.post("/api/v1/unit/runs/{rel_path:path}/reanalyze")
+def api_unit_reanalyze_single(rel_path: str):
+    """重新分析单个单元测试运行（强制重新分析，覆盖已有结果）"""
+    from ..orchestrator.pipeline import analyze_run
+    from ..analyzer.k2_client import K2Client
+    import uuid
+    import os
+
+    job_id = str(uuid.uuid4())
+
+    def run_reanalysis():
+        try:
+            cfg = load_env_config(source_url=None, archive_root=None)
+            archive_root_unit = cfg.archive_root_unit or "./archive/unit"
+
+            # 构建完整路径
+            run_dir = os.path.join(archive_root_unit, rel_path)
+
+            if not os.path.exists(run_dir):
+                raise ValueError(f"Run directory not found: {run_dir}")
+
+            # 执行强制重新分析（需要K2客户端和archive_root）
+            k2 = K2Client(
+                cfg.model) if cfg.model and cfg.model.enabled else None
+            analyze_run(run_dir, k2, archive_root_unit, reuse_existing=False)
+
+            # 更新任务状态
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "completed",
+                    "result": "重新分析完成"
+                }
+
+        except Exception as e:
+            import traceback
+            error_msg = f"重新分析失败: {str(e)}"
+            print(f"重新分析错误: {error_msg}")
+            traceback.print_exc()
+
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "failed",
+                    "error": error_msg
+                }
+
+    # 在后台执行
+    _pool.submit(run_reanalysis)
     with _jobs_lock:
         _jobs[job_id] = {"status": "running"}
 
@@ -680,7 +734,8 @@ async def api_unit_webhook(request: Request):
                 # AI分析
                 k2 = K2Client(
                     cfg.model) if cfg.model and cfg.model.enabled else None
-                analyze_run(run_dir, k2, cfg.archive_root_unit)
+                analyze_run(run_dir, k2, cfg.archive_root_unit,
+                            reuse_existing=True)
                 analyzed_count += 1
 
             _jobs[job_id] = {

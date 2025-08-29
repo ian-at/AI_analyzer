@@ -165,12 +165,19 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
     }
 
     // 分析单个运行
-    const analyzeSingleRun = async (rel: string) => {
+    const analyzeSingleRun = async (rel: string, forceReanalyze: boolean = false) => {
         try {
             setSingleAnalysisLoading(rel)
-            const data: JobResp = await postJSON(`/api/v1/unit/runs/${encodeURIComponent(rel)}/analyze`, {})
 
-            message.success('已开始分析单个测试运行')
+            // 根据是否强制重新分析选择不同的API端点
+            const endpoint = forceReanalyze
+                ? `/api/v1/unit/runs/${encodeURIComponent(rel)}/reanalyze`
+                : `/api/v1/unit/runs/${encodeURIComponent(rel)}/analyze`
+
+            const data: JobResp = await postJSON(endpoint, {})
+
+            const actionText = forceReanalyze ? '重新分析' : '分析'
+            message.success(`已开始${actionText}单个测试运行`)
 
             // 轮询任务状态
             pollJobStatus(data.job_id, () => {
@@ -329,7 +336,7 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
                                 size="small"
                                 type={analyzed ? 'default' : 'primary'}
                                 icon={<ThunderboltOutlined />}
-                                onClick={() => analyzeSingleRun(r.rel)}
+                                onClick={() => analyzeSingleRun(r.rel, analyzed)}
                                 loading={singleAnalysisLoading === r.rel}
                             >
                                 {label}

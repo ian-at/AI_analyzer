@@ -144,11 +144,33 @@ def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_exis
         # 若已有单元测试结果且非空，直接复用
         existing = read_jsonl(os.path.join(run_dir, anomalies_file))
         if reuse_existing and existing:
+            # 复用时也需要根据当前配置确定分析引擎信息
+            test_summary = get_test_summary(entries)
+            failed_count = test_summary.get("failed", 0)
+
+            # 确定分析引擎信息（与下面的逻辑保持一致）
+            if failed_count > 0 and k2 and k2.enabled():
+                # 检查现有结果是否包含AI分析
+                has_ai_analysis = any(
+                    any(rc.get("ai_enhanced", False)
+                        for rc in anomaly.get("root_causes", []))
+                    for anomaly in existing
+                )
+                if has_ai_analysis:
+                    engine_name = k2.get_model_name()
+                    degraded = False
+                else:
+                    engine_name = "unit_test_analyzer"
+                    degraded = True
+            else:
+                engine_name = "unit_test_analyzer"
+                degraded = False
+
             summ = summarize(existing)
             summ["analysis_engine"] = {
-                "name": "unit_test_analyzer",
+                "name": engine_name,
                 "version": "1.0",
-                "degraded": False,
+                "degraded": degraded,
             }
             summ["analysis_time"] = datetime.utcnow().isoformat() + "Z"
             write_json(os.path.join(run_dir, "summary.json"), summ)

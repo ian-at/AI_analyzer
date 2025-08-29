@@ -15,7 +15,7 @@ def parse_unit_test_log(log_text: str) -> list[dict[str, Any]]:
     产出统一记录：
     - suite: "UnitTest"
     - case: 测试用例名称
-    - metric: "test_result" 
+    - metric: "test_result"
     - value: 1 (PASS) 或 0 (FAIL)
     - unit: "result"
     - status: "PASS" 或 "FAIL"
