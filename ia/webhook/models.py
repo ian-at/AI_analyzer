@@ -16,7 +16,8 @@ class SimplifiedWebhookResponse(BaseModel):
     ai_model_configured: Optional[str] = Field(None, description="配置的AI模型")
     force_refetch: bool = Field(False, description="是否强制重新获取")
     force_reanalyze: bool = Field(True, description="是否强制重新分析")
-    max_search_days: int = Field(7, description="最大搜索天数")
+    max_search_days: Optional[int] = Field(
+        7, description="最大搜索天数，None表示搜索所有日期")
     status_url: Optional[str] = Field(None, description="状态查询URL")
     estimated_time: Optional[str] = Field(None, description="预计完成时间")
     process_flow: Optional[List[str]] = Field(None, description="处理流程")

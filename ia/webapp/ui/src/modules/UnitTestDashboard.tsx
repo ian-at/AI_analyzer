@@ -228,10 +228,14 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
     const columns = [
         {
             title: '日期',
-            dataIndex: 'date',
-            key: 'date',
+            dataIndex: 'downloaded_at',
+            key: 'downloaded_at',
             width: 120,
-            render: (date: string) => dayjs(date).format('YYYY-MM-DD HH:mm')
+            render: (date: string, record: any) => {
+                // 优先使用downloaded_at，如果没有则使用date
+                const displayDate = record.downloaded_at || record.date
+                return dayjs(displayDate).format('YYYY-MM-DD HH:mm')
+            }
         },
         {
             title: '补丁信息',
@@ -294,7 +298,7 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
                         percent={rate}
                         size="small"
                         status={rate === 100 ? 'success' : rate < 90 ? 'exception' : 'normal'}
-                        format={(percent) => `${percent?.toFixed(0)}%`}
+                        format={(percent) => `${percent?.toFixed(1)}%`}
                     />
                 )
             }
@@ -307,9 +311,9 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
                 const analyzed = r.has_analysis || false
                 const successRate = r.success_rate || 0
 
-                // 如果成功率是100%，不显示分析状态
+                // 如果成功率是100%，显示"-"
                 if (successRate >= 100) {
-                    return null
+                    return <span style={{ color: '#999' }}>-</span>
                 }
 
                 return analyzed ? (
