@@ -282,8 +282,10 @@ def api_unit_summary():
             total_test_cases_failed += summary.get("failed", 0)
             success_rates.append(summary.get("success_rate", 0))
 
-    avg_success_rate = sum(success_rates) / \
-        len(success_rates) if success_rates else 0
+    # 修正：计算总体成功率 = 所有通过的测试用例数 / 所有测试用例总数
+    total_test_cases = total_test_cases_passed + total_test_cases_failed
+    avg_success_rate = round((total_test_cases_passed /
+                              total_test_cases * 100), 2) if total_test_cases > 0 else 0
 
     # 判断趋势（简化版）
     recent_trend = "stable"
@@ -359,12 +361,16 @@ def api_unit_trend():
         totals = daily_stats[date]["total_counts"]
         passeds = daily_stats[date]["passed_counts"]
 
-        avg_rate = sum(rates) / len(rates) if rates else 0
+        # 修正：计算当日真实成功率 = 当日通过测试用例数 / 当日总测试用例数
         total_fails = sum(fails)
         total_tests = sum(totals)
         total_passed = sum(passeds)
 
-        success_rates.append(avg_rate)
+        # 使用当日实际的通过率，而不是平均各个运行的成功率
+        daily_success_rate = round((total_passed / total_tests *
+                                    100), 2) if total_tests > 0 else 0
+
+        success_rates.append(daily_success_rate)
         failed_counts.append(total_fails)
         total_counts.append(total_tests)
         passed_counts.append(total_passed)

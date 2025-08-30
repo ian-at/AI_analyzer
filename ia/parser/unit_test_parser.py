@@ -149,7 +149,7 @@ def parse_unit_test_log(log_text: str) -> list[dict[str, Any]]:
             "suite": "UnitTest",
             "case": "",
             "metric": "success_rate",
-            "value": (summary_info["passed"] / summary_info["total"] * 100) if summary_info["total"] > 0 else 0,
+            "value": round((summary_info["passed"] / summary_info["total"] * 100), 2) if summary_info["total"] > 0 else 0,
             "unit": "percentage",
             "status": summary_info["final_result"],
             "raw": {"summary": summary_info}

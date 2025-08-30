@@ -282,7 +282,7 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
                 return (
                     <Space size="small">
                         <Tag color={status === 'success' ? 'green' : status === 'error' ? 'red' : 'orange'} icon={icon}>
-                            {rate.toFixed(1)}%
+                            {rate.toFixed(2)}%
                         </Tag>
                         <span style={{ fontSize: 12, color: '#666' }}>
                             {passed}/{total} 通过
@@ -305,7 +305,7 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
                         percent={rate}
                         size="small"
                         status={rate === 100 ? 'success' : rate < 90 ? 'exception' : 'normal'}
-                        format={(percent) => `${percent?.toFixed(1)}%`}
+                        format={(percent) => `${percent?.toFixed(2)}%`}
                     />
                 )
             }
@@ -428,7 +428,7 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
                         <Statistic
                             title="平均成功率"
                             value={summary.data?.average_success_rate || 0}
-                            precision={1}
+                            precision={2}
                             suffix="%"
                             valueStyle={{
                                 color: (summary.data?.average_success_rate || 0) >= 95 ? '#3f8600' :
@@ -472,7 +472,7 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
                             const latest = trendData[trendData.length - 1]
                             const previous = trendData.length > 1 ? trendData[trendData.length - 2] : latest
                             const change = latest - previous
-                            const changeText = change > 0 ? `↑${change.toFixed(1)}%` : change < 0 ? `↓${Math.abs(change).toFixed(1)}%` : '持平'
+                            const changeText = change > 0 ? `↑${change.toFixed(2)}%` : change < 0 ? `↓${Math.abs(change).toFixed(2)}%` : '持平'
                             return `单元测试成功率趋势 (${changeText})`
                         })()}
                         option={{
@@ -486,7 +486,7 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
                                     else if (value >= 90) quality = ' 🟡 良好'
                                     else if (value >= 80) quality = ' 🟠 一般'
                                     else quality = ' 🔴 需改进'
-                                    return `${param.name}<br/>成功率: ${value?.toFixed(1)}%${quality}`
+                                    return `${param.name}<br/>成功率: ${value?.toFixed(2)}%${quality}`
                                 }
                             },
                             legend: {
@@ -916,7 +916,17 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
                         title="质量趋势指标"
                         option={{
                             tooltip: {
-                                trigger: 'axis'
+                                trigger: 'axis',
+                                formatter: function (params: any) {
+                                    let result = `${params[0].name}<br/>`
+                                    params.forEach((param: any) => {
+                                        const value = param.seriesName === '稳定性指数' ?
+                                            param.value.toFixed(2) :
+                                            param.value.toFixed(2) + '%'
+                                        result += `${param.marker}${param.seriesName}: ${value}<br/>`
+                                    })
+                                    return result
+                                }
                             },
                             legend: {
                                 data: ['成功率', '稳定性指数'],
@@ -966,10 +976,30 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
                                     type: 'line',
                                     yAxisIndex: 1,
                                     data: (trend.data?.success_rates || []).map((rate, index, arr) => {
-                                        // 计算稳定性指数：基于成功率的变化幅度
-                                        if (index === 0) return 8
-                                        const change = Math.abs(rate - arr[index - 1])
-                                        return Math.max(1, 10 - change * 2) // 变化越小，稳定性越高
+                                        // 改进的稳定性指数计算：考虑波动率和成功率水平
+                                        if (index === 0) return 8.00
+
+                                        // 1. 计算短期波动率（最近3个点的平均变化）
+                                        const start = Math.max(0, index - 2)
+                                        const window = arr.slice(start, index + 1)
+                                        let avgVolatility = 0
+                                        for (let i = 1; i < window.length; i++) {
+                                            avgVolatility += Math.abs(window[i] - window[i - 1])
+                                        }
+                                        avgVolatility = avgVolatility / (window.length - 1)
+
+                                        // 2. 成功率水平调整因子
+                                        let levelFactor = 1.0
+                                        if (rate >= 95) levelFactor = 1.1      // 高成功率更稳定
+                                        else if (rate < 85) levelFactor = 0.9  // 低成功率本身不稳定
+
+                                        // 3. 趋势方向小幅奖励
+                                        const trendBonus = rate > arr[index - 1] ? 0.1 : 0
+
+                                        // 4. 综合计算：基础分10分，根据波动率扣分，应用调整因子
+                                        const baseScore = Math.max(2, 10 - avgVolatility * 1.5) * levelFactor + trendBonus
+
+                                        return Math.round(Math.min(10, baseScore) * 100) / 100
                                     }),
                                     smooth: true,
                                     lineStyle: { width: 2, color: '#1890ff', type: 'dashed' },
@@ -993,7 +1023,7 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
                             tooltip: { position: 'top' },
                             grid: { height: '60%', top: '10%' },
                             xAxis: { type: 'category', data: (heatmap.data?.items || []).map(i => dayjs(i.date).format('MM-DD')), splitArea: { show: true } },
-                            yAxis: { type: 'category', data: ['优秀', '良好', '一般', '较差'], splitArea: { show: true } },
+                            yAxis: { type: 'category', data: ['优秀(95%-100%)', '良好(90%-95%)', '一般(80%-90%)', '较差(<80%)'], splitArea: { show: true } },
                             visualMap: { min: 0, max: Math.max(1, ...(heatmap.data?.items || []).map(i => Math.max(i.excellent || 0, i.good || 0, i.fair || 0, i.poor || 0))), calculable: true, orient: 'horizontal', left: 'center', bottom: 0 },
                             series: [{ type: 'heatmap', data: (() => { const items = (heatmap.data?.items || []); const out: any[] = []; const ys = ['excellent', 'good', 'fair', 'poor']; items.forEach((d, xi) => { ys.forEach((y, yi) => { out.push([xi, yi, (d as any)[y] || 0]) }) }); return out })(), emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.3)' } } }]
                         }}
