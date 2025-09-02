@@ -10,6 +10,33 @@ def _norm_name(s: str) -> str:
     return re.sub(r"\s+", " ", s.strip())
 
 
+def _format_interface_test_name(test_name: str) -> str:
+    """格式化接口测试用例名称，提取方法名
+
+    输入: interface_tests/test_xcore_basic_interfaces.py:TestXcoreGetApiVersion.test_api_version_basic
+    输出: test_api_version_basic
+    """
+    if not test_name:
+        return test_name
+
+    # 提取方法名部分
+    # 格式: path/file.py:ClassName.method_name
+    if ":" in test_name:
+        # 获取冒号后的部分：ClassName.method_name
+        class_method = test_name.split(":")[-1]
+
+        if "." in class_method:
+            # 只取方法名部分
+            method_name = class_method.split(".", 1)[1]
+            return method_name
+        else:
+            # 如果没有方法名，返回类名
+            return class_method
+
+    # 如果格式不符合预期，返回原始名称
+    return test_name
+
+
 def parse_interface_test_log(log_text: str) -> list[dict[str, Any]]:
     """解析接口测试日志文件，提取每个测试用例的结果。
 
@@ -36,7 +63,9 @@ def parse_interface_test_log(log_text: str) -> list[dict[str, Any]]:
     # 解析每个测试用例
     tests = data.get("tests", [])
     for test in tests:
-        test_name = _norm_name(test.get("name", ""))
+        # 格式化测试用例名称为更简洁的格式
+        raw_test_name = test.get("name", "")
+        test_name = _format_interface_test_name(raw_test_name)
         status = test.get("status", "UNKNOWN").upper()
 
         # 转换状态为数值：PASS=1, FAIL/ERROR=0, SKIP保持为0但状态不同
@@ -65,9 +94,10 @@ def parse_interface_test_log(log_text: str) -> list[dict[str, Any]]:
             "status": status,
             "raw": {
                 "test_id": test.get("id", ""),
-                "test_name": test_name,
-                "fail_reason": fail_reason,  # 重要：失败原因信息
-                "logfile": logfile,          # 重要：详细日志文件路径
+                "test_name": test_name,           # 格式化后的名称
+                "raw_test_name": raw_test_name,   # 保留原始完整名称
+                "fail_reason": fail_reason,      # 重要：失败原因信息
+                "logfile": logfile,              # 重要：详细日志文件路径
                 "logdir": logdir,
                 "time_elapsed": time_elapsed,
                 "actual_time_start": test.get("actual_time_start", 0),
