@@ -1406,6 +1406,12 @@ def health():
     return {"ok": True}
 
 
+@app.get("/api/v1/health")
+def health_check_v1():
+    """健康检查端点 - API v1版本"""
+    return {"status": "ok", "service": "intelligent-analysis"}
+
+
 @app.post("/api/v1/actions/reanalyze-recent")
 def action_reanalyze_recent(limit: int = Query(10), no_fallback: bool = Query(False)):
     """主动触发：对最近 N 个 run 执行解析+分析（K2 或启发式）并刷新 summary，引擎信息写入 summary.analysis_engine。"""
@@ -1431,10 +1437,17 @@ def action_reanalyze_recent(limit: int = Query(10), no_fallback: bool = Query(Fa
                 "last_analysis_count": len(done),
                 "last_analysis_criteria": f"最近{limit}个运行"
             }
-            requests.post(
-                "http://localhost:8000/api/v1/analysis/status", json=status_data)
-        except:
-            pass
+            response = requests.post(
+                "http://localhost:8000/api/v1/analysis/status",
+                json=status_data,
+                timeout=5
+            )
+            response.raise_for_status()  # 验证响应状态
+            print(f"分析状态更新成功: {status_data}")
+        except requests.exceptions.RequestException as e:
+            print(f"更新分析状态失败 (网络错误): {e}")
+        except Exception as e:
+            print(f"更新分析状态失败 (其他错误): {e}")
 
         return {"processed": len(done), "runs": done}
 
@@ -1547,10 +1560,17 @@ def action_reanalyze_custom(
                 "last_analysis_count": len(done),
                 "last_analysis_criteria": criteria_str
             }
-            requests.post(
-                "http://localhost:8000/api/v1/analysis/status", json=status_data)
-        except:
-            pass
+            response = requests.post(
+                "http://localhost:8000/api/v1/analysis/status",
+                json=status_data,
+                timeout=5
+            )
+            response.raise_for_status()  # 验证响应状态
+            print(f"分析状态更新成功: {status_data}")
+        except requests.exceptions.RequestException as e:
+            print(f"更新分析状态失败 (网络错误): {e}")
+        except Exception as e:
+            print(f"更新分析状态失败 (其他错误): {e}")
 
         return {
             "processed": len(done),
@@ -1649,10 +1669,17 @@ def action_reanalyze_all_missing(engine: str = Query("auto", description="分析
                 "last_analysis_count": len(processed),
                 "last_analysis_criteria": "分析所有未分析"
             }
-            requests.post(
-                "http://localhost:8000/api/v1/analysis/status", json=status_data)
-        except Exception:
-            pass
+            response = requests.post(
+                "http://localhost:8000/api/v1/analysis/status",
+                json=status_data,
+                timeout=5
+            )
+            response.raise_for_status()  # 验证响应状态
+            print(f"分析状态更新成功: {status_data}")
+        except requests.exceptions.RequestException as e:
+            print(f"更新分析状态失败 (网络错误): {e}")
+        except Exception as e:
+            print(f"更新分析状态失败 (其他错误): {e}")
 
         return {"processed": processed, "total": total}
 
@@ -1722,90 +1749,100 @@ def reanalyze_single_run(
     engine: str = Query("auto", description="分析引擎: auto|k2|heuristic")
 ):
     """重新分析单个运行"""
-    from ..reporting.aggregate import collect_runs
+    try:
+        from ..reporting.aggregate import collect_runs
 
-    cfg = load_env_config(
-        source_url=None, archive_root=ARCHIVE_ROOT, days=None)
-    k2 = K2Client(cfg.model) if cfg.model.enabled else None
+        cfg = load_env_config(
+            source_url=None, archive_root=ARCHIVE_ROOT, days=None)
+        k2 = K2Client(cfg.model) if cfg.model.enabled else None
 
-    # 引擎选择逻辑
-    use_k2 = None
-    no_fallback = False
-    if engine == "k2":
-        if not k2 or not k2.enabled():
-            return JSONResponse(status_code=400, content={"error": "K2引擎需要配置OPENAI_*环境变量"})
-        use_k2 = k2
-        no_fallback = True
-    elif engine == "heuristic":
+        # 引擎选择逻辑
         use_k2 = None
-        no_fallback = True
-    else:  # auto
-        use_k2 = k2 if (k2 and k2.enabled()) else None
         no_fallback = False
+        if engine == "k2":
+            if not k2 or not k2.enabled():
+                return JSONResponse(status_code=400, content={"error": "K2引擎需要配置OPENAI_*环境变量"})
+            use_k2 = k2
+            no_fallback = True
+        elif engine == "heuristic":
+            use_k2 = None
+            no_fallback = True
+        else:  # auto
+            use_k2 = k2 if (k2 and k2.enabled()) else None
+            no_fallback = False
 
-    def _work_with_progress(job_id):
-        from ..orchestrator.pipeline import analyze_run, parse_run
+        def _work_with_progress(job_id):
+            from ..orchestrator.pipeline import analyze_run, parse_run
+            from ..analyzer.progress_tracker import get_tracker
+            import requests
+            import os
+
+            # 检查运行是否存在
+            run_dir = os.path.join(ARCHIVE_ROOT, rel_path)
+            if not os.path.isdir(run_dir):
+                return {"error": f"运行不存在: {rel_path}"}
+
+            # 更新进度状态
+            tracker = get_tracker()
+            tracker.update_progress(job_id, status="running",
+                                    details={"run": rel_path, "engine": engine})
+
+            try:
+                # 检查是否需要解析
+                ub_path = os.path.join(run_dir, "ub.jsonl")
+                if not os.path.exists(ub_path) or os.path.getsize(ub_path) == 0:
+                    parse_run(run_dir)
+
+                # 执行分析，传递job_id
+                analyze_run(run_dir, use_k2, ARCHIVE_ROOT,
+                            reuse_existing=False, job_id=job_id)
+
+                done = [rel_path]
+
+                # 更新进度为完成
+                tracker.update_progress(job_id, status="completed",
+                                        current_batch=1, total_batches=1)
+            except Exception as e:
+                # 更新进度为失败
+                tracker.update_progress(job_id, status="failed",
+                                        error_message=str(e))
+                done = []
+
+            # 更新分析状态
+            try:
+                status_data = {
+                    "last_analysis_engine": engine.upper(),
+                    "last_analysis_count": len(done),
+                    "last_analysis_criteria": f"单个运行: {rel_path}"
+                }
+                response = requests.post(
+                    "http://localhost:8000/api/v1/analysis/status",
+                    json=status_data,
+                    timeout=5
+                )
+                response.raise_for_status()  # 验证响应状态
+                print(f"分析状态更新成功: {status_data}")
+            except requests.exceptions.RequestException as e:
+                print(f"更新分析状态失败 (网络错误): {e}")
+            except Exception as e:
+                print(f"更新分析状态失败 (其他错误): {e}")
+
+            return {"processed": len(done), "runs": done, "rel": rel_path}
+
+        # 创建进度跟踪
+        import uuid
         from ..analyzer.progress_tracker import get_tracker
-        import requests
-        import os
-
-        # 检查运行是否存在
-        run_dir = os.path.join(ARCHIVE_ROOT, rel_path)
-        if not os.path.isdir(run_dir):
-            return {"error": f"运行不存在: {rel_path}"}
-
-        # 更新进度状态
         tracker = get_tracker()
-        tracker.update_progress(job_id, status="running",
-                                details={"run": rel_path, "engine": engine})
+        job_id = uuid.uuid4().hex[:12]
+        progress_info = tracker.create_job(job_id, total_batches=1)
+        print(f"Created job {job_id} with progress tracking")
 
-        try:
-            # 检查是否需要解析
-            ub_path = os.path.join(run_dir, "ub.jsonl")
-            if not os.path.exists(ub_path) or os.path.getsize(ub_path) == 0:
-                parse_run(run_dir)
+        # 启动任务
+        _pool.submit(_work_with_progress, job_id)
 
-            # 执行分析，传递job_id
-            analyze_run(run_dir, use_k2, ARCHIVE_ROOT,
-                        reuse_existing=False, job_id=job_id)
-
-            done = [rel_path]
-
-            # 更新进度为完成
-            tracker.update_progress(job_id, status="completed",
-                                    current_batch=1, total_batches=1)
-        except Exception as e:
-            # 更新进度为失败
-            tracker.update_progress(job_id, status="failed",
-                                    error_message=str(e))
-            done = []
-
-        # 更新分析状态
-        try:
-            status_data = {
-                "last_analysis_engine": engine.upper(),
-                "last_analysis_count": len(done),
-                "last_analysis_criteria": f"单个运行: {rel_path}"
-            }
-            requests.post(
-                "http://localhost:8000/api/v1/analysis/status", json=status_data)
-        except:
-            pass
-
-        return {"processed": len(done), "runs": done, "rel": rel_path}
-
-    # 创建进度跟踪
-    import uuid
-    from ..analyzer.progress_tracker import get_tracker
-    tracker = get_tracker()
-    job_id = uuid.uuid4().hex[:12]
-    progress_info = tracker.create_job(job_id, total_batches=1)
-    print(f"Created job {job_id} with progress tracking")
-
-    # 启动任务
-    _pool.submit(_work_with_progress, job_id)
-
-    return {"job_id": job_id, "rel": rel_path, "progress_url": f"/api/v1/progress/{job_id}"}
+        return {"job_id": job_id, "rel": rel_path, "progress_url": f"/api/v1/progress/{job_id}"}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"重新分析失败: {str(e)}"})
 
 
 @app.post("/api/v1/actions/crawl-data")
@@ -1846,10 +1883,17 @@ def action_crawl_data(
                 "last_analysis_count": len(processed),
                 "last_analysis_criteria": f"爬取最近{days}天数据"
             }
-            requests.post(
-                "http://localhost:8000/api/v1/analysis/status", json=status_data)
-        except Exception:
-            pass
+            response = requests.post(
+                "http://localhost:8000/api/v1/analysis/status",
+                json=status_data,
+                timeout=5
+            )
+            response.raise_for_status()  # 验证响应状态
+            print(f"分析状态更新成功: {status_data}")
+        except requests.exceptions.RequestException as e:
+            print(f"更新分析状态失败 (网络错误): {e}")
+        except Exception as e:
+            print(f"更新分析状态失败 (其他错误): {e}")
 
         return {"processed": processed}
 

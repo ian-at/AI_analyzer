@@ -142,12 +142,23 @@ class K2Client:
     def _create_session(self) -> requests.Session:
         """创建带重试机制的会话"""
         session = requests.Session()
-        retry_strategy = Retry(
-            total=3,
-            backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
-            method_whitelist=["POST", "GET"]  # 兼容旧版本urllib3
-        )
+        # 兼容不同版本的urllib3
+        try:
+            # 新版本urllib3使用allowed_methods
+            retry_strategy = Retry(
+                total=3,
+                backoff_factor=1,
+                status_forcelist=[429, 500, 502, 503, 504],
+                allowed_methods=["POST", "GET"]
+            )
+        except TypeError:
+            # 旧版本urllib3使用method_whitelist
+            retry_strategy = Retry(
+                total=3,
+                backoff_factor=1,
+                status_forcelist=[429, 500, 502, 503, 504],
+                method_whitelist=["POST", "GET"]
+            )
         adapter = HTTPAdapter(max_retries=retry_strategy)
         session.mount("http://", adapter)
         session.mount("https://", adapter)
