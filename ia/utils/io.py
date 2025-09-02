@@ -21,6 +21,9 @@ HTML_NAME_RE = re.compile(
 # 适配 unit-2248-1.log 格式（2248 为 patch_id，1 为 patch_set）
 UNIT_LOG_NAME_RE = re.compile(
     r"unit-(?P<patch_id>\d+)-(?P<patch_set>\d+)\.log$", re.IGNORECASE)
+# 适配 interface-2248-1.log 格式（2248 为 patch_id，1 为 patch_set）
+INTERFACE_LOG_NAME_RE = re.compile(
+    r"^interface-(?P<patch_id>\d+)-(?P<patch_set>\d+)\.log$", re.IGNORECASE)
 
 
 def ensure_dir(path: str) -> None:
@@ -167,6 +170,29 @@ def list_remote_logs(day_url: str) -> list[RemoteLog]:
         if href.lower().endswith(".log"):
             name = href.split("/")[-1]
             m = UNIT_LOG_NAME_RE.search(name)
+            if not m:
+                continue
+            patch_id = m.group("patch_id")
+            patch_set = m.group("patch_set")
+            if not day_url.endswith("/"):
+                base = day_url + "/"
+            else:
+                base = day_url
+            full_url = base + name
+            results.append(RemoteLog(full_url, name, patch_id, patch_set))
+    return results
+
+
+def list_remote_interface_logs(day_url: str) -> list[RemoteLog]:
+    """列出远程目录中的接口测试日志文件"""
+    resp = fetch_url(day_url)
+    soup = BeautifulSoup(resp.text, "html.parser")
+    results: list[RemoteLog] = []
+    for a in soup.find_all("a"):
+        href = a.get("href", "")
+        if href.lower().endswith(".log"):
+            name = href.split("/")[-1]
+            m = INTERFACE_LOG_NAME_RE.search(name)
             if not m:
                 continue
             patch_id = m.group("patch_id")
