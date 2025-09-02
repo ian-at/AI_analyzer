@@ -35,8 +35,10 @@ class ModelConfig:
 class AppConfig:
     source_url: str
     source_url_unit: str = ""
+    source_url_interface: str = ""  # 接口测试数据源URL
     archive_root: str = ""
     archive_root_unit: str = ""
+    archive_root_interface: str = ""  # 接口测试本地存储路径
     days: int = 7
     model: ModelConfig = None
 
@@ -107,12 +109,20 @@ def load_env_config(
     source_url_unit = os.environ.get("SOURCE_URL_UNIT") or (file_cfg.get(
         "SOURCE_URL_UNIT") if file_cfg else None) or ""
 
+    # 接口测试配置
+    source_url_interface = os.environ.get("SOURCE_URL_INTERFACE") or (file_cfg.get(
+        "SOURCE_URL_INTERFACE") if file_cfg else None) or ""
+
     archive_root = archive_root or os.environ.get("ARCHIVE_ROOT") or (
         file_cfg.get("ARCHIVE_ROOT") if file_cfg else None) or "./archive/ub"
 
     # 单元测试存档目录
     archive_root_unit = os.environ.get("ARCHIVE_ROOT_UNIT") or (file_cfg.get(
         "ARCHIVE_ROOT_UNIT") if file_cfg else None) or "./archive/unit"
+
+    # 接口测试存档目录
+    archive_root_interface = os.environ.get("ARCHIVE_ROOT_INTERFACE") or (file_cfg.get(
+        "ARCHIVE_ROOT_INTERFACE") if file_cfg else None) or "./archive/interface"
     if days is None:
         days_val = os.environ.get("DAYS") or (
             file_cfg.get("DAYS") if file_cfg else None)
@@ -149,8 +159,10 @@ def load_env_config(
     return AppConfig(
         source_url=source_url,
         source_url_unit=source_url_unit,
+        source_url_interface=source_url_interface,
         archive_root=archive_root,
         archive_root_unit=archive_root_unit,
+        archive_root_interface=archive_root_interface,
         days=days,
         model=model_cfg,
     )
