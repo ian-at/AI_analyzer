@@ -1606,6 +1606,273 @@ def api_interface_patch_analysis():
     }
 
 
+@app.post("/api/v1/webhook/analyze-interface-patch", response_model=SimplifiedWebhookResponse)
+@app.get("/api/v1/webhook/analyze-interface-patch", response_model=SimplifiedWebhookResponse)
+async def webhook_analyze_interface_patch(
+    patch_id: str = Query(..., description="补丁ID"),
+    patch_set: str = Query(..., description="补丁集"),
+    force_refetch: bool = Query(False, description="是否强制重新获取"),
+    force_reanalyze: bool = Query(True, description="是否强制重新分析"),
+    max_search_days: int | None = Query(None, description="最大搜索天数，不设置则搜索所有日期")
+):
+    """
+    接口测试的简化Webhook接口 - 根据patch_id和patch_set获取并分析接口测试数据
+    支持GET和POST方法
+    """
+    from ..config import load_env_config
+    from ..fetcher.interface_test_crawler import crawl_interface_test_incremental
+    from ..orchestrator.pipeline import parse_run, analyze_run
+    from ..analyzer.k2_client import K2Client
+    from ..reporting.aggregate import collect_runs
+    from datetime import datetime, timedelta
+    import uuid
+    import os
+
+    # 生成任务ID
+    job_id = uuid.uuid4().hex[:12]
+
+    try:
+        cfg = load_env_config(source_url=None, archive_root=None)
+        if not cfg.source_url_interface:
+            return SimplifiedWebhookResponse(
+                success=False,
+                patch=f"{patch_id}/{patch_set}",
+                message="接口测试源URL未配置",
+                engine="interface_test_analyzer",
+                ai_model_configured="not_configured",
+                force_refetch=force_refetch,
+                force_reanalyze=force_reanalyze,
+                max_search_days=max_search_days,
+                error="Interface test source URL not configured"
+            )
+
+        # 先检查本地数据是否已存在
+        if max_search_days:
+            cutoff = datetime.now() - timedelta(days=max_search_days)
+            runs = collect_runs(cfg.archive_root_interface,
+                                cutoff.strftime('%Y-%m-%d'), None)
+        else:
+            # 搜索所有本地数据
+            runs = collect_runs(cfg.archive_root_interface, None, None)
+
+        found_run = None
+        for run in runs:
+            if (str(run.get("patch_id")) == str(patch_id) and
+                    str(run.get("patch_set")) == str(patch_set)):
+                found_run = run
+                break
+
+        # 如果本地没找到，检查远程是否存在
+        data_exists = found_run is not None
+        remote_exists = False
+
+        if not data_exists:
+            # 检查远程数据是否存在
+            try:
+                from ..utils.io import list_remote_date_dirs, list_remote_interface_logs
+                import requests
+
+                # 获取远程日期目录
+                remote_dates = list_remote_date_dirs(cfg.source_url_interface)
+
+                # 根据max_search_days限制搜索范围
+                if max_search_days:
+                    search_dates = remote_dates[-max_search_days:]
+                else:
+                    search_dates = remote_dates
+
+                # 在指定日期范围中查找目标patch
+                for day_url in search_dates:
+                    try:
+                        remote_logs = list_remote_interface_logs(day_url)
+                        for log in remote_logs:
+                            if (str(log.patch_id) == str(patch_id) and
+                                    str(log.patch_set) == str(patch_set)):
+                                remote_exists = True
+                                data_exists = True
+                                print(f"在远程找到接口测试数据: {log.name}")
+                                break
+                        if remote_exists:
+                            break
+                    except Exception as e:
+                        print(f"检查远程日期 {day_url} 失败: {e}")
+                        continue
+
+            except Exception as e:
+                print(f"检查远程数据失败: {e}")
+
+        # 获取模型信息（与单元测试一致）
+        k2 = K2Client(cfg.model) if cfg.model and cfg.model.enabled else None
+        engine_name = k2.get_model_name() if k2 and k2.enabled() else "interface_test_analyzer"
+        ai_configured = "configured" if k2 and k2.enabled() else "not_configured"
+
+        # 如果本地和远程都没找到数据，返回失败（与单元测试一致）
+        if not data_exists:
+            search_scope = f"最近{max_search_days}天" if max_search_days else "所有日期"
+            return SimplifiedWebhookResponse(
+                success=False,
+                patch=f"{patch_id}/{patch_set}",
+                message=f"未找到 patch {patch_id}/{patch_set} 的接口测试数据（搜索了{search_scope}）",
+                engine=engine_name,
+                ai_model_configured=ai_configured,
+                force_refetch=force_refetch,
+                force_reanalyze=force_reanalyze,
+                max_search_days=max_search_days,
+                error=f"No interface test data found for patch {patch_id}/{patch_set}"
+            )
+
+        def _async_process():
+            with _jobs_lock:
+                _jobs[job_id] = {"status": "running",
+                                 "progress": 10, "message": "开始处理接口测试数据"}
+
+            try:
+                current_found_run = found_run
+
+                # 1. 获取数据（如果本地没有或强制重新获取）
+                if not current_found_run or force_refetch:
+                    with _jobs_lock:
+                        _jobs[job_id]["progress"] = 30
+                        _jobs[job_id]["message"] = "获取接口测试数据"
+
+                    new_runs = crawl_interface_test_incremental(
+                        cfg.source_url_interface,
+                        cfg.archive_root_interface,
+                        max_search_days
+                    )
+
+                    # 查找目标run
+                    for run_path in new_runs:
+                        if f"_p{patch_id}" in run_path and f"_ps{patch_set}" in run_path:
+                            current_found_run = {"run_dir": run_path}
+                            break
+
+                    # 如果还是没找到，重新收集本地runs
+                    if not current_found_run:
+                        if max_search_days:
+                            cutoff = datetime.now() - timedelta(days=max_search_days)
+                            runs = collect_runs(
+                                cfg.archive_root_interface, cutoff.strftime('%Y-%m-%d'), None)
+                        else:
+                            runs = collect_runs(
+                                cfg.archive_root_interface, None, None)
+                        for run in runs:
+                            if (str(run.get("patch_id")) == str(patch_id) and
+                                    str(run.get("patch_set")) == str(patch_set)):
+                                current_found_run = run
+                                break
+
+                if not current_found_run:
+                    with _jobs_lock:
+                        _jobs[job_id] = {
+                            "status": "failed",
+                            "error": f"未找到 patch {patch_id}/{patch_set} 的接口测试数据"
+                        }
+                    return
+
+                run_dir = current_found_run["run_dir"]
+
+                # 2. 解析数据
+                with _jobs_lock:
+                    _jobs[job_id]["progress"] = 60
+                    _jobs[job_id]["message"] = "解析接口测试数据"
+
+                parse_run(run_dir)
+
+                # 检查测试结果，决定是否需要AI分析
+                from ..parser.interface_test_parser import get_interface_test_summary
+                from ..utils.io import read_jsonl
+
+                interface_file = os.path.join(run_dir, "interface.jsonl")
+                need_ai_analysis = False
+                analysis_message = "接口测试分析完成"
+
+                if os.path.exists(interface_file):
+                    records = read_jsonl(interface_file)
+                    summary = get_interface_test_summary(records)
+                    failed_count = summary.get("failed", 0)
+                    success_rate = summary.get("success_rate", 0)
+
+                    if failed_count > 0 and success_rate < 100:
+                        need_ai_analysis = True
+                        analysis_message = "接口测试AI分析完成"
+                    else:
+                        analysis_message = "接口测试全部通过，无需AI分析"
+
+                # 3. AI分析（仅在有失败测试时执行）
+                if need_ai_analysis:
+                    with _jobs_lock:
+                        _jobs[job_id]["progress"] = 80
+                        _jobs[job_id]["message"] = "执行AI分析"
+
+                    analyze_run(run_dir, k2, cfg.archive_root_interface,
+                                reuse_existing=not force_reanalyze)
+                else:
+                    with _jobs_lock:
+                        _jobs[job_id]["progress"] = 90
+                        _jobs[job_id]["message"] = "跳过AI分析（全部通过）"
+
+                # 4. 完成
+                with _jobs_lock:
+                    _jobs[job_id] = {
+                        "status": "completed",
+                        "progress": 100,
+                        "message": analysis_message,
+                        "result": {
+                            "run_dir": run_dir,
+                            "analysis_engine": engine_name if need_ai_analysis else "interface_test_analyzer",
+                            "ai_analysis_performed": need_ai_analysis,
+                            "message": analysis_message
+                        }
+                    }
+
+            except Exception as e:
+                with _jobs_lock:
+                    _jobs[job_id] = {
+                        "status": "failed",
+                        "error": str(e)
+                    }
+
+        # 启动后台任务
+        _pool.submit(_async_process)
+
+        # 确定引擎和AI模型信息
+        engine_name = "interface_test_analyzer"
+        ai_configured = "not_configured"
+
+        if cfg.model and cfg.model.enabled:
+            engine_name = cfg.model.model or "interface_test_analyzer"
+            ai_configured = cfg.model.model or "not_configured"
+
+        return SimplifiedWebhookResponse(
+            success=True,
+            job_id=job_id,
+            patch=f"{patch_id}/{patch_set}",
+            message="接口测试分析任务已启动",
+            engine=engine_name,
+            ai_model_configured=ai_configured,
+            force_refetch=force_refetch,
+            force_reanalyze=force_reanalyze,
+            max_search_days=max_search_days,
+            status_url=f"/api/v1/jobs/{job_id}",
+            estimated_time="1-3分钟",
+            process_flow=["获取数据", "解析测试结果", "AI根因分析", "生成报告"]
+        )
+
+    except Exception as e:
+        return SimplifiedWebhookResponse(
+            success=False,
+            patch=f"{patch_id}/{patch_set}",
+            message=f"Webhook处理失败: {str(e)}",
+            engine="interface_test_analyzer",
+            ai_model_configured="unknown",
+            force_refetch=force_refetch,
+            force_reanalyze=force_reanalyze,
+            max_search_days=max_search_days,
+            error=str(e)
+        )
+
+
 @app.post("/api/v1/webhook/analyze-unit-patch", response_model=SimplifiedWebhookResponse)
 @app.get("/api/v1/webhook/analyze-unit-patch", response_model=SimplifiedWebhookResponse)
 async def webhook_analyze_unit_patch(
