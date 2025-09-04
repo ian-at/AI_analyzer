@@ -170,7 +170,7 @@ def parse_interface_test_log(log_text: str) -> list[dict[str, Any]]:
             "metric": "final_result",
             "value": 1 if (failed_tests + error_tests) == 0 else 0,
             "unit": "result",
-            "status": "PASS" if (failed_tests + error_tests) == 0 else "FAIL",
+            "status": "PASSED" if (failed_tests + error_tests) == 0 else "FAILED",
             "raw": {
                 "description": "整体测试结果",
                 "job_id": data.get("job_id", ""),
