@@ -6,9 +6,10 @@ import { Dashboard } from './Dashboard'
 import { RunDetail } from './RunDetail'
 import { UnitTestDashboard } from './UnitTestDashboard'
 import { UnitTestDetail } from './UnitTestDetail'
+import { InterfaceTestDashboard } from './InterfaceTestDashboard'
 import { useScrollRestore } from '../hooks/useScrollRestore'
 
-type Page = 'dashboard' | 'run' | 'unit-dashboard' | 'unit-detail'
+type Page = 'dashboard' | 'run' | 'unit-dashboard' | 'unit-detail' | 'interface-dashboard' | 'interface-detail'
 type TestType = 'ub' | 'unit' | 'interface' | 'lb'
 
 async function getJSON<T>(url: string): Promise<T> {
@@ -47,11 +48,20 @@ export function App() {
                 return { page: 'unit-detail' as Page, rel, testType: 'unit' as TestType }
             }
             return { page: 'unit-dashboard' as Page, rel: '', testType: 'unit' as TestType }
+        } else if (hash.startsWith('/interface/')) {
+            const subPath = hash.slice(11)
+            if (subPath.startsWith('detail/')) {
+                const rel = decodeURIComponent(subPath.slice(7))
+                return { page: 'interface-detail' as Page, rel, testType: 'interface' as TestType }
+            }
+            return { page: 'interface-dashboard' as Page, rel: '', testType: 'interface' as TestType }
         } else if (hash.startsWith('/run/')) {
             const rel = decodeURIComponent(hash.slice(5))
             return { page: 'run' as Page, rel, testType: 'ub' as TestType }
         } else if (hash === '/unit-dashboard') {
             return { page: 'unit-dashboard' as Page, rel: '', testType: 'unit' as TestType }
+        } else if (hash === '/interface-dashboard') {
+            return { page: 'interface-dashboard' as Page, rel: '', testType: 'interface' as TestType }
         }
         return { page: 'dashboard' as Page, rel: '', testType: 'ub' as TestType }
     }
@@ -104,10 +114,14 @@ export function App() {
             window.location.hash = '#/dashboard'
         } else if (newPage === 'unit-dashboard' && type === 'unit') {
             window.location.hash = '#/unit-dashboard'
+        } else if (newPage === 'interface-dashboard' && type === 'interface') {
+            window.location.hash = '#/interface-dashboard'
         } else if (newPage === 'run' && newRel && type === 'ub') {
             window.location.hash = `#/run/${encodeURIComponent(newRel)}`
         } else if (newPage === 'unit-detail' && newRel && type === 'unit') {
             window.location.hash = `#/unit/detail/${encodeURIComponent(newRel)}`
+        } else if (newPage === 'interface-detail' && newRel && type === 'interface') {
+            window.location.hash = `#/interface/detail/${encodeURIComponent(newRel)}`
         }
     }
 
@@ -393,6 +407,14 @@ export function App() {
                     setPage('unit-dashboard');
                     updateURL('unit-dashboard', '', 'unit');
                 }} />
+            case 'interface-dashboard':
+                return <InterfaceTestDashboard onOpenRun={(r: string) => {
+                    setRel(r);
+                    setPage('interface-detail');
+                    updateURL('interface-detail', r, 'interface');
+                }} />
+            case 'interface-detail':
+                return <div>接口测试详情页面开发中...</div>
             default:
                 return <Dashboard onOpenRun={(r) => {
                     setRel(r);
@@ -421,8 +443,10 @@ export function App() {
                                     updateURL('dashboard', '', newType)
                                 } else if (newType === 'unit') {
                                     updateURL('unit-dashboard', '', newType)
+                                } else if (newType === 'interface') {
+                                    updateURL('interface-dashboard', '', newType)
                                 } else {
-                                    message.info(`${newType === 'interface' ? '接口测试' : 'LB测试'}功能即将推出`)
+                                    message.info('LB测试功能即将推出')
                                 }
                             }}
                             buttonStyle="solid"
@@ -440,7 +464,7 @@ export function App() {
                                     <span>单元测试</span>
                                 </Space>
                             </Radio.Button>
-                            <Radio.Button value="interface" disabled>
+                            <Radio.Button value="interface">
                                 <Space size={4}>
                                     <ApiOutlined />
                                     <span>接口测试</span>

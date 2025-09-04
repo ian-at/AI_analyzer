@@ -34,6 +34,15 @@ def parse_run(run_dir: str) -> list[dict[str, Any]]:
         records = parse_unit_test_log(log_text)
         # 保存为unit.jsonl以区别于ub.jsonl
         write_jsonl(os.path.join(run_dir, "unit.jsonl"), records)
+    elif test_type == "interface_test":
+        # 解析接口测试日志
+        from ..parser.interface_test_parser import parse_interface_test_log
+        log_path = os.path.join(run_dir, "raw_logs", meta["files"]["log"])
+        with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+            log_text = f.read()
+        records = parse_interface_test_log(log_text)
+        # 保存为interface.jsonl
+        write_jsonl(os.path.join(run_dir, "interface.jsonl"), records)
     else:
         # 解析UnixBench HTML (默认行为)
         html_path = os.path.join(run_dir, "raw_html", meta["files"]["html"])

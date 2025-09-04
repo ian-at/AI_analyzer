@@ -860,6 +860,464 @@ async def api_unit_webhook(request: Request):
     }
 
 
+# ========== 接口测试 API ==========
+
+@app.get("/api/v1/interface/runs")
+def api_interface_runs_v1(
+    page: int = Query(1),
+    page_size: int = Query(20),
+    test_type: str = Query("interface"),
+    start: str | None = Query(None),
+    end: str | None = Query(None),
+    failed_only: bool = Query(False),
+    patch_id: str | None = Query(None)
+):
+    """获取接口测试运行列表（复用单元测试的逻辑）"""
+    from ..reporting.aggregate import collect_runs
+    from ..parser.interface_test_parser import get_interface_test_summary
+    from ..utils.io import read_jsonl
+    import os
+
+    # 从配置获取正确的archive_root_interface
+    cfg = load_env_config(source_url=None, archive_root=None)
+    archive_root_interface = cfg.archive_root_interface or "./archive/interface"
+    runs = collect_runs(archive_root_interface, start, end)
+
+    # 过滤和处理
+    filtered_runs = []
+    for run in runs:
+        # 读取接口测试数据
+        interface_file = os.path.join(run["run_dir"], "interface.jsonl")
+        if os.path.exists(interface_file):
+            records = read_jsonl(interface_file)
+            summary = get_interface_test_summary(records)
+
+            # 应用过滤条件
+            if failed_only and summary.get("failed", 0) == 0:
+                continue
+            if patch_id and run.get("patch_id") != patch_id:
+                continue
+
+            # 检查是否有分析结果
+            anomaly_file = os.path.join(
+                run["run_dir"], "anomalies.interface.jsonl")
+            has_analysis = os.path.exists(
+                anomaly_file) and os.path.getsize(anomaly_file) > 0
+
+            # 读取meta.json获取首次下载时间
+            meta_file = os.path.join(run["run_dir"], "meta.json")
+            downloaded_at = run["date"]
+            if os.path.exists(meta_file):
+                try:
+                    from ..utils.io import read_json
+                    meta = read_json(meta_file)
+                    downloaded_at = meta.get("downloaded_at", run["date"])
+                except Exception as e:
+                    print(f"读取meta.json失败: {e}")
+
+            # 添加接口测试特定字段
+            run["total_tests"] = summary.get("total", 0)
+            run["passed_tests"] = summary.get("passed", 0)
+            run["failed_tests"] = summary.get("failed", 0)
+            run["success_rate"] = summary.get("success_rate", 0)
+            run["has_analysis"] = has_analysis
+            run["downloaded_at"] = downloaded_at
+
+            filtered_runs.append(run)
+
+    # 分页
+    total = len(filtered_runs)
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    page_runs = filtered_runs[start_idx:end_idx]
+
+    return {
+        "runs": page_runs,
+        "page": page,
+        "page_size": page_size,
+        "total": total
+    }
+
+
+@app.post("/api/v1/interface/runs/{rel_path:path}/analyze")
+def api_interface_analyze_single(rel_path: str):
+    """分析单个接口测试运行（如果已分析则跳过）"""
+    from ..orchestrator.pipeline import analyze_run
+    from ..analyzer.k2_client import K2Client
+    import uuid
+    import os
+
+    job_id = str(uuid.uuid4())
+
+    def run_analysis():
+        try:
+            cfg = load_env_config(source_url=None, archive_root=None)
+            archive_root_interface = cfg.archive_root_interface or "./archive/interface"
+
+            # 构建完整路径
+            run_dir = os.path.join(archive_root_interface, rel_path)
+
+            if not os.path.exists(run_dir):
+                raise ValueError(f"Run directory not found: {run_dir}")
+
+            # 执行分析
+            k2 = K2Client(
+                cfg.model) if cfg.model and cfg.model.enabled else None
+            analyze_run(run_dir, k2, archive_root_interface,
+                        reuse_existing=True)
+
+            # 更新任务状态
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "completed",
+                    "result": "接口测试分析完成"
+                }
+        except Exception as e:
+            import traceback
+            error_msg = f"{str(e)}\n{traceback.format_exc()}"
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "failed",
+                    "error": error_msg
+                }
+
+    # 在后台执行
+    _pool.submit(run_analysis)
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "running"}
+
+    return {"job_id": job_id}
+
+
+@app.post("/api/v1/interface/runs/{rel_path:path}/reanalyze")
+def api_interface_reanalyze_single(rel_path: str):
+    """重新分析单个接口测试运行（强制重新分析）"""
+    from ..orchestrator.pipeline import analyze_run
+    from ..analyzer.k2_client import K2Client
+    import uuid
+    import os
+
+    job_id = str(uuid.uuid4())
+
+    def run_reanalysis():
+        try:
+            cfg = load_env_config(source_url=None, archive_root=None)
+            archive_root_interface = cfg.archive_root_interface or "./archive/interface"
+
+            # 构建完整路径
+            run_dir = os.path.join(archive_root_interface, rel_path)
+
+            if not os.path.exists(run_dir):
+                raise ValueError(f"Run directory not found: {run_dir}")
+
+            # 执行强制重新分析
+            k2 = K2Client(
+                cfg.model) if cfg.model and cfg.model.enabled else None
+            analyze_run(run_dir, k2, archive_root_interface,
+                        reuse_existing=False)
+
+            # 更新任务状态
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "completed",
+                    "result": "接口测试重新分析完成"
+                }
+
+        except Exception as e:
+            import traceback
+            error_msg = f"接口测试重新分析失败: {str(e)}"
+            print(f"重新分析错误: {error_msg}")
+            traceback.print_exc()
+
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "failed",
+                    "error": error_msg
+                }
+
+    # 在后台执行
+    _pool.submit(run_reanalysis)
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "running"}
+
+    return {"job_id": job_id}
+
+
+@app.post("/api/v1/interface/analyze")
+def api_interface_analyze(request: dict):
+    """触发接口测试AI分析"""
+    from ..config import load_env_config
+    from ..orchestrator.pipeline import parse_run, analyze_run
+    from ..analyzer.k2_client import K2Client
+    from ..reporting.aggregate import collect_runs
+    import uuid
+    import os
+
+    days = request.get("days", 7)
+    force = request.get("force", False)
+
+    job_id = str(uuid.uuid4())
+
+    def run_analysis():
+        try:
+            cfg = load_env_config(source_url=None, archive_root=None)
+            archive_root_interface = cfg.archive_root_interface or "./archive/interface"
+
+            # 获取需要分析的运行
+            from datetime import datetime, timedelta
+            cutoff = datetime.now() - timedelta(days=days)
+            runs = collect_runs(archive_root_interface,
+                                cutoff.strftime('%Y-%m-%d'), None)
+
+            analyzed_count = 0
+            for run in runs:
+                run_dir = run.get("run_dir", "")
+                interface_file = os.path.join(run_dir, "interface.jsonl")
+
+                # 如果force=True或者还没有分析结果，则进行分析
+                if os.path.exists(interface_file) and (force or not run.get("has_analysis", False)):
+                    try:
+                        # 确保已解析
+                        if not os.path.exists(interface_file):
+                            parse_run(run_dir)
+
+                        # 执行分析
+                        analyze_run(run_dir)
+                        analyzed_count += 1
+                    except Exception as e:
+                        print(f"分析失败 {run_dir}: {e}")
+
+            # 更新任务状态
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "completed",
+                    "result": f"分析了 {analyzed_count} 个接口测试运行"
+                }
+        except Exception as e:
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "failed",
+                    "error": str(e)
+                }
+
+    _pool.submit(run_analysis)
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "running"}
+
+    return {"job_id": job_id}
+
+
+@app.post("/api/v1/interface/runs/{rel_path:path}/analyze")
+def api_interface_analyze_single(rel_path: str):
+    """分析单个接口测试运行（如果已分析则跳过）"""
+    from ..orchestrator.pipeline import analyze_run
+    from ..analyzer.k2_client import K2Client
+    import uuid
+    import os
+
+    job_id = str(uuid.uuid4())
+
+    def run_analysis():
+        try:
+            cfg = load_env_config(source_url=None, archive_root=None)
+            archive_root_interface = cfg.archive_root_interface or "./archive/interface"
+
+            # 构建完整路径
+            run_dir = os.path.join(archive_root_interface, rel_path)
+
+            if not os.path.exists(run_dir):
+                raise ValueError(f"Run directory not found: {run_dir}")
+
+            # 执行分析（需要K2客户端和archive_root）
+            k2 = K2Client(
+                cfg.model) if cfg.model and cfg.model.enabled else None
+            analyze_run(run_dir, k2, archive_root_interface,
+                        reuse_existing=True)
+
+            # 更新任务状态
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "completed",
+                    "result": "分析完成"
+                }
+        except Exception as e:
+            import traceback
+            error_msg = f"{str(e)}\n{traceback.format_exc()}"
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "failed",
+                    "error": error_msg
+                }
+
+    # 在后台执行
+    _pool.submit(run_analysis)
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "running"}
+
+    return {"job_id": job_id}
+
+
+@app.post("/api/v1/interface/runs/{rel_path:path}/reanalyze")
+def api_interface_reanalyze_single(rel_path: str):
+    """重新分析单个接口测试运行（强制重新分析，覆盖已有结果）"""
+    from ..orchestrator.pipeline import analyze_run
+    from ..analyzer.k2_client import K2Client
+    import uuid
+    import os
+
+    job_id = str(uuid.uuid4())
+
+    def run_reanalysis():
+        try:
+            cfg = load_env_config(source_url=None, archive_root=None)
+            archive_root_interface = cfg.archive_root_interface or "./archive/interface"
+
+            # 构建完整路径
+            run_dir = os.path.join(archive_root_interface, rel_path)
+
+            if not os.path.exists(run_dir):
+                raise ValueError(f"Run directory not found: {run_dir}")
+
+            # 执行强制重新分析（需要K2客户端和archive_root）
+            k2 = K2Client(
+                cfg.model) if cfg.model and cfg.model.enabled else None
+            analyze_run(run_dir, k2, archive_root_interface,
+                        reuse_existing=False)
+
+            # 更新任务状态
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "completed",
+                    "result": "重新分析完成"
+                }
+
+        except Exception as e:
+            import traceback
+            error_msg = f"重新分析失败: {str(e)}"
+            print(f"重新分析错误: {error_msg}")
+            traceback.print_exc()
+
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "failed",
+                    "error": error_msg
+                }
+
+    # 在后台执行
+    _pool.submit(run_reanalysis)
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "running"}
+
+    return {"job_id": job_id}
+
+
+@app.post("/api/v1/interface/crawl")
+def api_interface_crawl(request: dict):
+    """触发接口测试数据获取"""
+    from ..config import load_env_config
+    from ..fetcher.interface_test_crawler import crawl_interface_test_incremental
+    import uuid
+
+    days = request.get("days", 7)
+    patch_id = request.get("patch_id")
+
+    job_id = str(uuid.uuid4())
+
+    def run_crawl():
+        try:
+            cfg = load_env_config(source_url=None, archive_root=None)
+            if not cfg.source_url_interface:
+                raise ValueError("Interface test source URL not configured")
+
+            # 执行爬取
+            new_runs = crawl_interface_test_incremental(
+                cfg.source_url_interface,
+                cfg.archive_root_interface,
+                days
+            )
+
+            # 解析爬取的数据
+            from ..orchestrator.pipeline import parse_run
+            parsed_count = 0
+            for run_dir in new_runs:
+                try:
+                    parse_run(run_dir)
+                    parsed_count += 1
+                except Exception as e:
+                    print(f"解析失败 {run_dir}: {e}")
+
+            # 更新任务状态
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "completed",
+                    "result": f"获取了 {len(new_runs)} 个新的测试运行，解析了 {parsed_count} 个"
+                }
+        except Exception as e:
+            with _jobs_lock:
+                _jobs[job_id] = {
+                    "status": "failed",
+                    "error": str(e)
+                }
+
+    # 在后台执行
+    _pool.submit(run_crawl)
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "running"}
+
+    return {"job_id": job_id}
+
+
+@app.get("/api/v1/interface/summary")
+def api_interface_summary():
+    """获取接口测试汇总统计"""
+    from ..reporting.aggregate import collect_runs
+    from ..parser.interface_test_parser import get_interface_test_summary
+    from ..utils.io import read_jsonl
+    import os
+
+    # 从配置获取正确的archive_root_interface
+    cfg = load_env_config(source_url=None, archive_root=None)
+    archive_root_interface = cfg.archive_root_interface or "./archive/interface"
+    runs = collect_runs(archive_root_interface, None, None)
+
+    total_runs_count = 0  # 运行记录总数
+    total_test_cases_passed = 0  # 测试用例通过总数
+    total_test_cases_failed = 0  # 测试用例失败总数
+    success_rates = []
+
+    for run in runs:
+        interface_file = os.path.join(run["run_dir"], "interface.jsonl")
+        if os.path.exists(interface_file):
+            records = read_jsonl(interface_file)
+            summary = get_interface_test_summary(records)
+
+            total_runs_count += 1
+            total_test_cases_passed += summary.get("passed", 0)
+            total_test_cases_failed += summary.get("failed", 0)
+            success_rates.append(summary.get("success_rate", 0))
+
+    # 计算总体成功率 = 所有通过的测试用例数 / 所有测试用例总数
+    total_test_cases = total_test_cases_passed + total_test_cases_failed
+    avg_success_rate = round((total_test_cases_passed /
+                              total_test_cases * 100), 2) if total_test_cases > 0 else 0
+
+    # 判断趋势（简化版）
+    recent_trend = "stable"
+    if len(success_rates) >= 5:
+        recent = success_rates[-5:]
+        if recent[-1] > recent[0]:
+            recent_trend = "improving"
+        elif recent[-1] < recent[0]:
+            recent_trend = "declining"
+
+    return {
+        "total_runs": total_runs_count,
+        "average_success_rate": avg_success_rate,
+        "recent_trend": recent_trend,
+        "analyzed_runs": len([r for r in runs if r.get("has_analysis", False)])
+    }
+
+
 @app.post("/api/v1/webhook/analyze-unit-patch", response_model=SimplifiedWebhookResponse)
 @app.get("/api/v1/webhook/analyze-unit-patch", response_model=SimplifiedWebhookResponse)
 async def webhook_analyze_unit_patch(
