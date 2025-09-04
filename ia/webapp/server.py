@@ -1070,21 +1070,23 @@ def api_interface_analyze(request: dict):
 
             analyzed_count = 0
             for run in runs:
-                run_dir = run.get("run_dir", "")
-                interface_file = os.path.join(run_dir, "interface.jsonl")
+                run_dir = run["run_dir"]
 
-                # 如果force=True或者还没有分析结果，则进行分析
-                if os.path.exists(interface_file) and (force or not run.get("has_analysis", False)):
-                    try:
-                        # 确保已解析
-                        if not os.path.exists(interface_file):
-                            parse_run(run_dir)
+                # 检查是否需要分析
+                anomalies_file = os.path.join(run_dir, "anomalies.k2.jsonl")
+                if not force and os.path.exists(anomalies_file):
+                    continue  # 已分析，跳过
 
-                        # 执行分析
-                        analyze_run(run_dir)
-                        analyzed_count += 1
-                    except Exception as e:
-                        print(f"分析失败 {run_dir}: {e}")
+                try:
+                    # 解析和分析
+                    parse_run(run_dir)
+                    k2 = K2Client(
+                        cfg.model) if cfg.model and cfg.model.enabled else None
+                    analyze_run(run_dir, k2, archive_root_interface,
+                                reuse_existing=True)
+                    analyzed_count += 1
+                except Exception as e:
+                    print(f"分析失败 {run_dir}: {e}")
 
             # 更新任务状态
             with _jobs_lock:
