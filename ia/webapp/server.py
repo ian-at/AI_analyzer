@@ -1375,6 +1375,240 @@ def api_interface_summary():
     }
 
 
+@app.get("/api/v1/interface/trend")
+def api_interface_trend():
+    """获取接口测试成功率趋势"""
+    from ..reporting.aggregate import collect_runs
+    from ..parser.interface_test_parser import get_interface_test_summary
+    from ..utils.io import read_jsonl
+    import os
+    from datetime import datetime, timedelta
+
+    # 从配置获取正确的archive_root_interface
+    cfg = load_env_config(source_url=None, archive_root=None)
+    archive_root_interface = cfg.archive_root_interface or "./archive/interface"
+
+    # 获取所有历史数据
+    runs = collect_runs(archive_root_interface, None, None)
+
+    # 按日期分组
+    daily_stats = {}
+    for run in runs:
+        date = run.get("date", "").split("T")[0]  # 获取日期部分
+        if not date:
+            continue
+
+        interface_file = os.path.join(run["run_dir"], "interface.jsonl")
+        if os.path.exists(interface_file):
+            records = read_jsonl(interface_file)
+            summary = get_interface_test_summary(records)
+
+            if date not in daily_stats:
+                daily_stats[date] = {
+                    "success_rates": [],
+                    "failed_counts": [],
+                    "total_counts": [],
+                    "passed_counts": []
+                }
+
+            daily_stats[date]["success_rates"].append(
+                summary.get("success_rate", 0))
+            daily_stats[date]["failed_counts"].append(summary.get("failed", 0))
+            daily_stats[date]["total_counts"].append(summary.get("total", 0))
+            daily_stats[date]["passed_counts"].append(summary.get("passed", 0))
+
+    # 计算每天的平均值
+    dates = sorted(daily_stats.keys())
+    success_rates = []
+    failed_counts = []
+    total_counts = []
+    passed_counts = []
+
+    for date in dates:
+        stats = daily_stats[date]
+        success_rates.append(
+            sum(stats["success_rates"]) / len(stats["success_rates"]) if stats["success_rates"] else 0)
+        failed_counts.append(sum(stats["failed_counts"]))
+        total_counts.append(sum(stats["total_counts"]))
+        passed_counts.append(sum(stats["passed_counts"]))
+
+    return {
+        "dates": dates,
+        "success_rates": success_rates,
+        "failed_counts": failed_counts,
+        "total_counts": total_counts,
+        "passed_counts": passed_counts
+    }
+
+
+@app.get("/api/v1/interface/failure-distribution")
+def api_interface_failure_distribution():
+    """获取接口测试失败分布"""
+    from ..reporting.aggregate import collect_runs
+    from ..utils.io import read_jsonl
+    import os
+    from collections import Counter
+
+    # 从配置获取正确的archive_root_interface
+    cfg = load_env_config(source_url=None, archive_root=None)
+    archive_root_interface = cfg.archive_root_interface or "./archive/interface"
+
+    # 获取所有历史数据
+    runs = collect_runs(archive_root_interface, None, None)
+
+    # 统计失败测试的分类
+    failure_categories = Counter()
+
+    for run in runs:
+        anomalies_file = os.path.join(run["run_dir"], "anomalies.k2.jsonl")
+        if os.path.exists(anomalies_file):
+            anomalies = read_jsonl(anomalies_file)
+            for anomaly in anomalies:
+                # 从根因分析中获取分类
+                root_causes = anomaly.get("root_causes", [])
+                for cause in root_causes:
+                    category = cause.get("category", "unknown")
+                    failure_categories[category] += 1
+
+    # 转换为百分比
+    total = sum(failure_categories.values())
+    categories = []
+
+    for name, count in failure_categories.most_common(10):  # 只显示前10个
+        percentage = (count / total * 100) if total > 0 else 0
+        categories.append({
+            "name": name,
+            "count": count,
+            "percentage": round(percentage, 1)
+        })
+
+    return {
+        "categories": categories
+    }
+
+
+@app.get("/api/v1/interface/heatmap")
+def api_interface_heatmap():
+    """获取接口测试质量热力图数据"""
+    from ..reporting.aggregate import collect_runs
+    from ..parser.interface_test_parser import get_interface_test_summary
+    from ..utils.io import read_jsonl
+    import os
+    from datetime import datetime, timedelta
+
+    # 从配置获取正确的archive_root_interface
+    cfg = load_env_config(source_url=None, archive_root=None)
+    archive_root_interface = cfg.archive_root_interface or "./archive/interface"
+
+    # 获取最近30天的数据
+    cutoff = datetime.now() - timedelta(days=30)
+    runs = collect_runs(archive_root_interface,
+                        cutoff.strftime('%Y-%m-%d'), None)
+
+    # 定义成功率区间
+    rate_ranges = [
+        ("优秀", 95, 100),
+        ("良好", 90, 94.99),
+        ("一般", 80, 89.99),
+        ("较差", 0, 79.99)
+    ]
+
+    # 按日期和成功率区间分组
+    heatmap_data = []
+    date_stats = {}
+
+    for run in runs:
+        date = run.get("date", "").split("T")[0]
+        if not date:
+            continue
+
+        interface_file = os.path.join(run["run_dir"], "interface.jsonl")
+        if os.path.exists(interface_file):
+            records = read_jsonl(interface_file)
+            summary = get_interface_test_summary(records)
+            success_rate = summary.get("success_rate", 0)
+
+            if date not in date_stats:
+                date_stats[date] = []
+            date_stats[date].append(success_rate)
+
+    # 生成热力图数据
+    for date in sorted(date_stats.keys()):
+        rates = date_stats[date]
+        avg_rate = sum(rates) / len(rates) if rates else 0
+
+        # 确定属于哪个质量区间
+        for range_name, min_rate, max_rate in rate_ranges:
+            if min_rate <= avg_rate <= max_rate:
+                heatmap_data.append({
+                    "date": date,
+                    "quality_range": range_name,
+                    "success_rate": round(avg_rate, 2),
+                    "run_count": len(rates)
+                })
+                break
+
+    return {
+        "heatmap_data": heatmap_data,
+        "rate_ranges": [{"name": name, "min": min_r, "max": max_r} for name, min_r, max_r in rate_ranges]
+    }
+
+
+@app.get("/api/v1/interface/patch-analysis")
+def api_interface_patch_analysis():
+    """获取接口测试Patch成功率分析"""
+    from ..reporting.aggregate import collect_runs
+    from ..parser.interface_test_parser import get_interface_test_summary
+    from ..utils.io import read_jsonl
+    import os
+    import re
+    from collections import defaultdict
+
+    # 从配置获取正确的archive_root_interface
+    cfg = load_env_config(source_url=None, archive_root=None)
+    archive_root_interface = cfg.archive_root_interface or "./archive/interface"
+
+    # 获取所有历史数据
+    runs = collect_runs(archive_root_interface, None, None)
+
+    # 按Patch ID分组统计
+    patch_stats = defaultdict(list)
+
+    for run in runs:
+        # 从run_dir中提取patch_id，例如：./archive/interface/2025-08-29/interface_p2444_ps2
+        run_dir = run.get("run_dir", "")
+        match = re.search(r"interface_p(\d+)_ps\d+", run_dir)
+        if not match:
+            continue
+
+        patch_id = match.group(1)
+
+        interface_file = os.path.join(run_dir, "interface.jsonl")
+        if os.path.exists(interface_file):
+            records = read_jsonl(interface_file)
+            summary = get_interface_test_summary(records)
+            success_rate = summary.get("success_rate", 0)
+
+            patch_stats[patch_id].append(success_rate)
+
+    # 计算每个Patch的平均成功率
+    patch_data = []
+    for patch_id, rates in patch_stats.items():
+        avg_rate = sum(rates) / len(rates) if rates else 0
+        patch_data.append({
+            "patch_id": f"P{patch_id}",
+            "success_rate": round(avg_rate, 2),
+            "run_count": len(rates)
+        })
+
+    # 按成功率排序
+    patch_data.sort(key=lambda x: x["success_rate"], reverse=True)
+
+    return {
+        "patches": patch_data[:20]  # 只显示前20个
+    }
+
+
 @app.post("/api/v1/webhook/analyze-unit-patch", response_model=SimplifiedWebhookResponse)
 @app.get("/api/v1/webhook/analyze-unit-patch", response_model=SimplifiedWebhookResponse)
 async def webhook_analyze_unit_patch(
