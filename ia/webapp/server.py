@@ -1060,17 +1060,14 @@ def api_interface_analyze(request: dict):
             cfg = load_env_config(source_url=None, archive_root=None)
             archive_root_interface = cfg.archive_root_interface or "./archive/interface"
 
-            # 获取需要分析的运行
-            from datetime import datetime, timedelta
-            cutoff = datetime.now() - timedelta(days=days)
-            runs = collect_runs(archive_root_interface,
-                                cutoff.strftime('%Y-%m-%d'), None)
+            # 获取需要分析的运行（使用所有历史数据，不限制时间）
+            runs = collect_runs(archive_root_interface, None, None)
 
             analyzed_count = 0
             for run in runs:
                 run_dir = run["run_dir"]
 
-                # 检查是否需要分析
+                # 检查是否需要分析（与单元测试逻辑完全一致）
                 anomalies_file = os.path.join(run_dir, "anomalies.k2.jsonl")
                 if not force and os.path.exists(anomalies_file):
                     continue  # 已分析，跳过
