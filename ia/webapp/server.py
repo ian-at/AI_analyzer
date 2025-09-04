@@ -459,10 +459,8 @@ def api_unit_failure_distribution():
     cfg = load_env_config(source_url=None, archive_root=None)
     archive_root_unit = cfg.archive_root_unit or "./archive/unit"
 
-    # 获取最近7天的数据
-    from datetime import datetime, timedelta
-    cutoff = datetime.now() - timedelta(days=7)
-    runs = collect_runs(archive_root_unit, cutoff.strftime('%Y-%m-%d'), None)
+    # 获取所有历史数据（不限定日期）
+    runs = collect_runs(archive_root_unit, None, None)
 
     # 统计失败测试的分类
     failure_categories = Counter()
