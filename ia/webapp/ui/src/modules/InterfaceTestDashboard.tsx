@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { Card, Row, Col, Table, Tag, Space, Button, DatePicker, Select, Input, Switch, message, Modal, Form, InputNumber, Progress, Statistic, Alert, Spin, Empty } from 'antd'
 import { useQuery } from '@tanstack/react-query'
-import { CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined, ReloadOutlined, SearchOutlined, FileTextOutlined, DownloadOutlined, ThunderboltOutlined, LineChartOutlined, BarChartOutlined, PieChartOutlined } from '@ant-design/icons'
+import { CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined, ReloadOutlined, SearchOutlined, FileTextOutlined, DownloadOutlined, ThunderboltOutlined, LineChartOutlined, BarChartOutlined, PieChartOutlined, TrophyOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 
 async function getJSON<T>(url: string): Promise<T> {
@@ -373,9 +373,10 @@ export function InterfaceTestDashboard(props: { onOpenRun: (rel: string) => void
                 <Col span={6}>
                     <Card>
                         <Statistic
-                            title="总运行次数"
+                            title="总测试运行"
                             value={summary.data?.total_runs || 0}
                             suffix="次"
+                            valueStyle={{ color: '#1890ff' }}
                             prefix={<BarChartOutlined />}
                         />
                     </Card>
@@ -391,6 +392,17 @@ export function InterfaceTestDashboard(props: { onOpenRun: (rel: string) => void
                                 color: (summary.data?.average_success_rate || 0) >= 95 ? '#3f8600' :
                                     (summary.data?.average_success_rate || 0) >= 90 ? '#faad14' : '#cf1322'
                             }}
+                            prefix={<TrophyOutlined />}
+                        />
+                    </Card>
+                </Col>
+                <Col span={6}>
+                    <Card>
+                        <Statistic
+                            title="总通过测试"
+                            value={summary.data?.total_passed || 0}
+                            suffix="个"
+                            valueStyle={{ color: '#3f8600' }}
                             prefix={<CheckCircleOutlined />}
                         />
                     </Card>
@@ -398,25 +410,11 @@ export function InterfaceTestDashboard(props: { onOpenRun: (rel: string) => void
                 <Col span={6}>
                     <Card>
                         <Statistic
-                            title="已分析记录"
-                            value={summary.data?.analyzed_runs || 0}
+                            title="总失败测试"
+                            value={summary.data?.total_failed || 0}
                             suffix="个"
-                            prefix={<LineChartOutlined />}
-                        />
-                    </Card>
-                </Col>
-                <Col span={6}>
-                    <Card>
-                        <Statistic
-                            title="质量趋势"
-                            value={summary.data?.recent_trend === 'improving' ? '上升' :
-                                summary.data?.recent_trend === 'declining' ? '下降' : '稳定'}
-                            valueStyle={{
-                                color: summary.data?.recent_trend === 'improving' ? '#3f8600' :
-                                    summary.data?.recent_trend === 'declining' ? '#cf1322' : '#666'
-                            }}
-                            prefix={summary.data?.recent_trend === 'improving' ? '↑' :
-                                summary.data?.recent_trend === 'declining' ? '↓' : '→'}
+                            valueStyle={{ color: '#cf1322' }}
+                            prefix={<CloseCircleOutlined />}
                         />
                     </Card>
                 </Col>

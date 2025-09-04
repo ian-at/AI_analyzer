@@ -1370,6 +1370,8 @@ def api_interface_summary():
     return {
         "total_runs": total_runs_count,
         "average_success_rate": avg_success_rate,
+        "total_passed": total_test_cases_passed,
+        "total_failed": total_test_cases_failed,
         "recent_trend": recent_trend,
         "analyzed_runs": len([r for r in runs if r.get("has_analysis", False)])
     }
