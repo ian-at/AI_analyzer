@@ -285,7 +285,8 @@ def analyze_interface_test_anomalies(
     # 为每个失败的测试用例创建异常记录
     for failed_test in failed_tests:
         test_name = failed_test.get("case", "")
-        fail_reason = failed_test.get("raw", {}).get("fail_reason", "")
+        fail_reason = failed_test.get("failure_reason", "") or failed_test.get(
+            "raw", {}).get("fail_reason", "")
 
         # 确定严重程度（基于失败原因）
         severity = "medium"  # 默认中等
@@ -297,6 +298,49 @@ def analyze_interface_test_anomalies(
         elif any(keyword in fail_reason.lower() for keyword in ["故意", "测试", "expect"]):
             severity = "low"
             confidence = 0.6
+
+        # 为每个测试用例找到对应的AI根因分析
+        test_specific_root_causes = []
+        test_specific_suggestions = []
+
+        if ai_analysis_success and root_causes:
+            # 从AI分析结果中找到对应这个测试用例的根因
+            for root_cause in root_causes:
+                if isinstance(root_cause, dict):
+                    # 检查是否是针对当前测试用例的分析
+                    if 'test_case' in root_cause:
+                        # 格式: {"test_case": "xxx", "analysis": {...}, "solution": "..."}
+                        if root_cause.get('test_case') == test_name or test_name.endswith(root_cause.get('test_case', '')):
+                            if 'analysis' in root_cause and isinstance(root_cause['analysis'], dict):
+                                analysis = root_cause['analysis']
+                                test_specific_root_causes.append({
+                                    "cause": analysis.get("cause", ""),
+                                    "likelihood": analysis.get("likelihood", 0.5),
+                                    "category": analysis.get("category", "general")
+                                })
+                            # 提取solution作为建议
+                            if 'solution' in root_cause:
+                                test_specific_suggestions.append(
+                                    root_cause['solution'])
+                    elif 'cause' in root_cause:
+                        # 格式: {"cause": "xxx", "likelihood": 0.95, "category": "xxx"}
+                        test_specific_root_causes.append({
+                            "cause": root_cause.get("cause", ""),
+                            "likelihood": root_cause.get("likelihood", 0.5),
+                            "category": root_cause.get("category", "general")
+                        })
+                    elif 'test' in root_cause:
+                        # 格式: {"test": "xxx", "cause": "xxx", ...}
+                        if root_cause.get('test') == test_name or test_name.endswith(root_cause.get('test', '')):
+                            test_specific_root_causes.append({
+                                "cause": root_cause.get("cause", ""),
+                                "likelihood": root_cause.get("likelihood", 0.5),
+                                "category": root_cause.get("category", "general")
+                            })
+
+            # 如果没找到特定的根因，使用通用的
+            if not test_specific_root_causes and root_causes:
+                test_specific_root_causes = root_causes[:3]  # 最多取前3个通用根因
 
         anomaly = {
             "suite": "InterfaceTest",
@@ -314,8 +358,8 @@ def analyze_interface_test_anomalies(
                 "test_category": failed_test.get("raw", {}).get("category", ""),
                 "ai_enhanced": ai_analysis_success
             },
-            "root_causes": root_causes,
-            "suggestions": suggestions
+            "root_causes": test_specific_root_causes if test_specific_root_causes else root_causes,
+            "suggestions": test_specific_suggestions if test_specific_suggestions else suggestions
         }
         anomalies.append(anomaly)
 
@@ -391,12 +435,53 @@ def generate_ai_enhanced_interface_root_causes(
 
         print(f"接口测试AI分析响应: {ai_response}")
 
-        if ai_response and "root_causes" in ai_response:
-            print(f"使用接口测试AI分析结果: {ai_response['root_causes']}")
-            return ai_response["root_causes"]
+        if ai_response:
+            # 处理不同的AI响应格式
+            if "root_causes" in ai_response:
+                print(f"使用接口测试AI分析结果: {ai_response['root_causes']}")
+                return ai_response["root_causes"]
+            elif isinstance(ai_response, list):
+                # AI直接返回了根因数组，转换为标准格式
+                root_causes = []
+                for item in ai_response:
+                    if isinstance(item, dict):
+                        # 处理不同的AI响应格式
+                        if 'cause' in item:
+                            # 格式1: 直接包含cause字段
+                            root_causes.append({
+                                "cause": item.get("cause", ""),
+                                "likelihood": item.get("likelihood", 0.5),
+                                "category": item.get("category", "general")
+                            })
+                        elif 'analysis' in item and isinstance(item['analysis'], dict):
+                            # 格式2: 嵌套在analysis字段中
+                            analysis = item['analysis']
+                            root_causes.append({
+                                "cause": analysis.get("cause", ""),
+                                "likelihood": analysis.get("likelihood", 0.5),
+                                "category": analysis.get("category", "general")
+                            })
+                        elif 'test_case' in item:
+                            # 格式3: 包含test_case的复杂格式，提取analysis部分
+                            if 'analysis' in item and isinstance(item['analysis'], dict):
+                                analysis = item['analysis']
+                                root_causes.append({
+                                    "cause": analysis.get("cause", ""),
+                                    "likelihood": analysis.get("likelihood", 0.5),
+                                    "category": analysis.get("category", "general")
+                                })
+                print(f"转换后的接口测试AI分析结果: {root_causes}")
+                # 调试：检查每个root_cause的likelihood值
+                for i, rc in enumerate(root_causes):
+                    print(
+                        f"Root cause {i}: likelihood={rc.get('likelihood')} (type: {type(rc.get('likelihood'))})")
+                return root_causes
+            else:
+                print(f"接口测试AI响应格式不正确: {ai_response}")
+                raise Exception("接口测试AI分析格式错误")
         else:
-            print(f"接口测试AI响应格式不正确或为空: {ai_response}")
-            raise Exception("接口测试AI分析未返回有效的root_causes")
+            print("接口测试AI响应为空")
+            raise Exception("接口测试AI分析未返回有效结果")
 
     except Exception as e:
         # AI分析失败时回退到规则分析
@@ -474,14 +559,31 @@ def _call_ai_for_interface_test_analysis(k2_client, prompt: str, test_names: Lis
             import json
             import re
 
+            # 清理markdown格式的JSON
+            content = content.strip()
+            if content.startswith('```json'):
+                content = content[7:]  # 移除```json
+            if content.endswith('```'):
+                content = content[:-3]  # 移除```
+            content = content.strip()
+
             # 尝试提取JSON部分
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            json_match = re.search(r'\[.*\]', content, re.DOTALL)
             if json_match:
                 json_str = json_match.group()
                 ai_result = json.loads(json_str)
+                # 如果AI直接返回了数组，包装为正确格式
+                if isinstance(ai_result, list):
+                    ai_result = {"root_causes": ai_result}
             else:
-                # 如果没有找到JSON，尝试解析整个响应
-                ai_result = json.loads(content)
+                # 尝试提取对象格式
+                json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group()
+                    ai_result = json.loads(json_str)
+                else:
+                    # 如果没有找到JSON，尝试解析整个响应
+                    ai_result = json.loads(content)
 
             # 确保返回格式正确
             if "root_causes" not in ai_result:

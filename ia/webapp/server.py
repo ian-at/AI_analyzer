@@ -898,11 +898,10 @@ def api_interface_runs_v1(
             if patch_id and run.get("patch_id") != patch_id:
                 continue
 
-            # 检查是否有分析结果
-            anomaly_file = os.path.join(
-                run["run_dir"], "anomalies.interface.jsonl")
+            # 检查是否有分析结果（检查summary.json文件）
+            summary_file = os.path.join(run["run_dir"], "summary.json")
             has_analysis = os.path.exists(
-                anomaly_file) and os.path.getsize(anomaly_file) > 0
+                summary_file) and os.path.getsize(summary_file) > 0
 
             # 读取meta.json获取首次下载时间
             meta_file = os.path.join(run["run_dir"], "meta.json")
@@ -1265,6 +1264,62 @@ def api_interface_crawl(request: dict):
         _jobs[job_id] = {"status": "running"}
 
     return {"job_id": job_id}
+
+
+@app.get("/api/v1/interface/runs/{rel_path:path}")
+def api_interface_detail(rel_path: str):
+    """获取接口测试详情"""
+    from ..parser.interface_test_parser import get_interface_test_summary
+    from ..utils.io import read_json, read_jsonl
+    import os
+
+    # 从配置获取正确的archive_root_interface
+    cfg = load_env_config(source_url=None, archive_root=None)
+    archive_root_interface = cfg.archive_root_interface or "./archive/interface"
+    run_dir = os.path.join(archive_root_interface, rel_path)
+
+    if not os.path.exists(run_dir):
+        return JSONResponse(status_code=404, content={"error": "Run not found"})
+
+    # 读取各种数据文件
+    meta = read_json(os.path.join(run_dir, "meta.json"))
+    summary = read_json(os.path.join(run_dir, "summary.json")) if os.path.exists(
+        os.path.join(run_dir, "summary.json")) else {}
+
+    # 读取测试结果
+    interface_file = os.path.join(run_dir, "interface.jsonl")
+    test_results = []
+    test_summary = {}
+
+    if os.path.exists(interface_file):
+        records = read_jsonl(interface_file)
+        test_summary = get_interface_test_summary(records)
+
+        # 提取测试用例结果
+        for record in records:
+            if record.get("case"):  # 只包含具体的测试用例
+                test_results.append({
+                    "case": record.get("case", ""),
+                    "status": record.get("status", ""),
+                    "failure_reason": record.get("failure_reason", ""),
+                    "execution_time": record.get("execution_time")
+                })
+
+    # 读取异常分析结果
+    anomalies_file = os.path.join(run_dir, "anomalies.k2.jsonl")
+    anomalies = []
+    if os.path.exists(anomalies_file):
+        anomalies = read_jsonl(anomalies_file)
+
+    return {
+        "run_dir": run_dir,
+        "rel": rel_path,
+        "meta": meta,
+        "summary": summary,
+        "test_results": test_results,
+        "test_summary": test_summary,
+        "anomalies": anomalies
+    }
 
 
 @app.get("/api/v1/interface/summary")

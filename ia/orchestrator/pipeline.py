@@ -128,6 +128,9 @@ def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_exis
     if test_type == "unit_test":
         entries = read_jsonl(os.path.join(run_dir, "unit.jsonl"))
         anomalies_file = "anomalies.unit.jsonl"
+    elif test_type == "interface_test":
+        entries = read_jsonl(os.path.join(run_dir, "interface.jsonl"))
+        anomalies_file = "anomalies.k2.jsonl"
     else:
         entries = read_jsonl(os.path.join(run_dir, "ub.jsonl"))
         anomalies_file = "anomalies.k2.jsonl"
@@ -208,6 +211,88 @@ def analyze_run(run_dir: str, k2: K2Client | None, archive_root: str, reuse_exis
         else:
             # 无失败测试或AI不可用，使用规则分析
             engine_name = "unit_test_analyzer"
+            engine_version = "1.0"
+            degraded = False
+
+        # 保存分析结果
+        write_jsonl(os.path.join(run_dir, anomalies_file), anomalies)
+        summ = summarize(anomalies)
+        summ["analysis_engine"] = {
+            "name": engine_name,
+            "version": engine_version,
+            "degraded": degraded,
+        }
+        summ["analysis_time"] = datetime.utcnow().isoformat() + "Z"
+        write_json(os.path.join(run_dir, "summary.json"), summ)
+        generate_report(run_dir, meta, anomalies, summ)
+        return anomalies, summ
+
+    # 接口测试使用专门的分析逻辑
+    if test_type == "interface_test":
+        # 若已有接口测试结果且非空，直接复用
+        existing = read_jsonl(os.path.join(run_dir, anomalies_file))
+        if reuse_existing and existing:
+            # 复用时也需要根据当前配置确定分析引擎信息
+            from ..parser.interface_test_parser import get_interface_test_summary
+            test_summary = get_interface_test_summary(entries)
+            failed_count = test_summary.get(
+                "failed", 0) + test_summary.get("errors", 0)
+
+            # 确定分析引擎信息（与单元测试逻辑保持一致）
+            if failed_count > 0 and k2 and k2.enabled():
+                # 检查现有结果是否包含AI分析
+                has_ai_analysis = any(
+                    anomaly.get("supporting_evidence", {}).get(
+                        "ai_enhanced", False)
+                    for anomaly in existing
+                )
+                if has_ai_analysis:
+                    engine_name = k2.get_model_name()
+                    degraded = False
+                else:
+                    engine_name = "interface_test_analyzer"
+                    degraded = True
+            else:
+                engine_name = "interface_test_analyzer"
+                degraded = False
+
+            summ = summarize(existing)
+            summ["analysis_engine"] = {
+                "name": engine_name,
+                "version": "1.0",
+                "degraded": degraded,
+            }
+            summ["analysis_time"] = datetime.utcnow().isoformat() + "Z"
+            write_json(os.path.join(run_dir, "summary.json"), summ)
+            generate_report(run_dir, meta, existing, summ)
+            return existing, summ
+
+        # 执行接口测试分析
+        from ..parser.interface_test_parser import get_interface_test_summary
+        from ..analyzer.interface_test_analyzer import analyze_interface_test_anomalies
+
+        test_summary = get_interface_test_summary(entries)
+        anomalies, analysis_info = analyze_interface_test_anomalies(
+            entries, test_summary, k2)
+
+        # 确定分析引擎信息
+        failed_count = test_summary.get(
+            "failed", 0) + test_summary.get("errors", 0)
+        if failed_count > 0 and k2 and k2.enabled():
+            # 有失败测试且AI可用
+            if analysis_info.get("ai_analysis_success", False):
+                # AI分析成功，显示AI模型名称
+                engine_name = k2.get_model_name()
+                engine_version = "1.0"
+                degraded = False
+            else:
+                # AI分析失败，降级到规则分析
+                engine_name = "interface_test_analyzer"
+                engine_version = "1.0"
+                degraded = True
+        else:
+            # 无失败测试或AI不可用，使用规则分析
+            engine_name = "interface_test_analyzer"
             engine_version = "1.0"
             degraded = False
 

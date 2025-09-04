@@ -7,6 +7,7 @@ import { RunDetail } from './RunDetail'
 import { UnitTestDashboard } from './UnitTestDashboard'
 import { UnitTestDetail } from './UnitTestDetail'
 import { InterfaceTestDashboard } from './InterfaceTestDashboard'
+import { InterfaceTestDetail } from './InterfaceTestDetail'
 import { useScrollRestore } from '../hooks/useScrollRestore'
 
 type Page = 'dashboard' | 'run' | 'unit-dashboard' | 'unit-detail' | 'interface-dashboard' | 'interface-detail'
@@ -414,7 +415,10 @@ export function App() {
                     updateURL('interface-detail', r, 'interface');
                 }} />
             case 'interface-detail':
-                return <div>接口测试详情页面开发中...</div>
+                return <InterfaceTestDetail rel={rel} onBack={() => {
+                    setPage('interface-dashboard');
+                    updateURL('interface-dashboard', '', 'interface');
+                }} />
             default:
                 return <Dashboard onOpenRun={(r) => {
                     setRel(r);
