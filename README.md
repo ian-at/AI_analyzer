@@ -1,12 +1,13 @@
 # 智能分析平台 (Intelligent Analysis Platform)
 
-基于AI的多测试类型智能分析平台，支持UnixBench性能测试和单元测试结果的智能分析，自动检测异常并提供根因分析。
+基于AI的多测试类型智能分析平台，支持UnixBench性能测试、单元测试和接口测试结果的智能分析，自动检测异常并提供根因分析。
 
 ## 核心功能
 
 ### 🎯 多测试类型支持
 - **UnixBench (UB)**: 性能基准测试结果分析
 - **单元测试 (Unit Test)**: 内核单元测试失败根因分析
+- **接口测试 (Interface Test)**: 接口兼容性测试异常检测
 
 ### 🤖 AI智能分析
 - 支持多模型配置（Claude、GPT、通义千问、Kimi等）
@@ -20,13 +21,14 @@
 - **实时进度跟踪**: 分析过程实时反馈
 
 ### 🌐 Web可视化面板
-- **多模块切换**: UB测试与单元测试的优雅切换
+- **多模块切换**: UB测试、单元测试与接口测试的优雅切换
 - **交互式图表**: 趋势分析、失败分布、质量热力图
 - **详细报告**: 测试用例级别的详细分析结果
 
 ### 📡 完整的Webhook支持
 - **UB测试**: `/api/v1/webhook/analyze-patch`
 - **单元测试**: `/api/v1/webhook/analyze-unit-patch`
+- **接口测试**: `/api/v1/webhook/analyze-interface-patch`
 - 支持外部系统调用，根据patch_id自动获取并分析数据
 
 ## 快速开始
@@ -56,6 +58,7 @@ python3 -m uvicorn ia.webapp.server:app --host 0.0.0.0 --port 8000
 - **Web界面**: `http://localhost:8000/static/ui/`
   - UB测试分析: `http://localhost:8000/static/ui/index.html#/dashboard`
   - 单元测试分析: `http://localhost:8000/static/ui/index.html#/unit-dashboard`
+  - 接口测试分析: `http://localhost:8000/static/ui/index.html#/interface-dashboard`
 - **API文档**: `http://localhost:8000/docs`
 
 ## 命令行工具
@@ -87,6 +90,11 @@ curl -X POST "http://localhost:8000/api/v1/webhook/analyze-patch?patch_id=2365&p
 curl -X POST "http://localhost:8000/api/v1/webhook/analyze-unit-patch?patch_id=2299&patch_set=4"
 ```
 
+### 接口测试分析
+```bash
+curl -X POST "http://localhost:8000/api/v1/webhook/analyze-interface-patch?patch_id=2444&patch_set=2"
+```
+
 ### 参数说明
 - `patch_id`: 补丁ID（必填）
 - `patch_set`: 补丁集（必填）
@@ -97,6 +105,7 @@ curl -X POST "http://localhost:8000/api/v1/webhook/analyze-unit-patch?patch_id=2
 详细文档请参考：
 - [API_DOCS.md](./samples/API_DOCS.md) - 完整API文档
 - [UNIT_TEST_WEBHOOK.md](./samples/UNIT_TEST_WEBHOOK.md) - 单元测试Webhook详细指南
+- [INTERFACE_TEST_WEBHOOK.md](./samples/INTERFACE_TEST_WEBHOOK.md) - 接口测试Webhook详细指南
 
 ## 项目结构
 
@@ -112,17 +121,21 @@ intelligent-analysis/
 │   │   └── ui/                 # React前端
 │   ├── fetcher/                 # 数据抓取
 │   │   ├── crawler.py          # UB数据爬虫
-│   │   └── unit_test_crawler.py # 单元测试数据爬虫
+│   │   ├── unit_test_crawler.py # 单元测试数据爬虫
+│   │   └── interface_test_crawler.py # 接口测试数据爬虫
 │   ├── parser/                  # 数据解析
 │   │   ├── parser.py           # UB数据解析
-│   │   └── unit_test_parser.py # 单元测试解析
+│   │   ├── unit_test_parser.py # 单元测试解析
+│   │   └── interface_test_parser.py # 接口测试解析
 │   └── reporting/              # 报告生成
 ├── archive/                     # 数据归档目录
 │   ├── ub/                     # UB测试数据
-│   └── unit/                   # 单元测试数据
+│   ├── unit/                   # 单元测试数据
+│   └── interface/              # 接口测试数据
 ├── samples/                     # 文档和示例
 │   ├── API_DOCS.md             # API文档
-│   └── UNIT_TEST_WEBHOOK.md    # 单元测试Webhook指南
+│   ├── UNIT_TEST_WEBHOOK.md    # 单元测试Webhook指南
+│   └── INTERFACE_TEST_WEBHOOK.md # 接口测试Webhook指南
 ├── models_config.json          # 主配置文件
 ├── start_server.sh             # 启动脚本
 └── analyze.sh                 # 分析脚本
@@ -143,8 +156,10 @@ intelligent-analysis/
 ### 数据源配置
 - `SOURCE_URL`: UB测试数据源URL
 - `SOURCE_URL_UNIT`: 单元测试数据源URL
+- `SOURCE_URL_INTERFACE`: 接口测试数据源URL
 - `ARCHIVE_ROOT`: UB测试本地存储路径
 - `ARCHIVE_ROOT_UNIT`: 单元测试本地存储路径
+- `ARCHIVE_ROOT_INTERFACE`: 接口测试本地存储路径
 
 ### AI模型配置
 - 多模型端点配置（Claude、GPT、通义千问、Kimi等）
@@ -169,6 +184,12 @@ intelligent-analysis/
 2. 点击"获取数据"按钮抓取最新的单元测试结果
 3. 对于有失败测试的patch，点击"分析"按钮进行AI根因分析
 4. 查看失败测试用例的详细分析和建议
+
+### 接口测试分析
+1. 访问接口测试面板: `http://localhost:8000/static/ui/index.html#/interface-dashboard`
+2. 点击"获取数据"按钮抓取最新的接口测试结果
+3. 对于有失败测试的patch，点击"分析"按钮进行AI异常分析
+4. 查看接口兼容性问题的详细报告和修复建议
 
 ### 智能特性
 - **条件分析**: 单元测试100%通过时自动跳过AI分析，节省资源
