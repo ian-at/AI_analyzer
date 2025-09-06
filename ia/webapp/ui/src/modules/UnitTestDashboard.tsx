@@ -235,13 +235,13 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
     const columns = [
         {
             title: '日期',
-            dataIndex: 'downloaded_at',
-            key: 'downloaded_at',
+            dataIndex: 'date',
+            key: 'date',
             width: 120,
             render: (date: string, record: any) => {
-                // 优先使用downloaded_at，如果没有则使用date
-                const displayDate = record.downloaded_at || record.date
-                return dayjs(displayDate).format('YYYY-MM-DD HH:mm')
+                // 优先使用date（实际测试执行日期），如果没有则使用downloaded_at
+                const displayDate = record.date || record.downloaded_at
+                return dayjs(displayDate).format('YYYY-MM-DD')
             }
         },
         {
