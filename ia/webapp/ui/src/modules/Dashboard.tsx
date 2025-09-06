@@ -438,8 +438,15 @@ export function Dashboard(props: { onOpenRun: (rel: string) => void }) {
                                 bottom: 10,
                                 formatter: (name: string) => {
                                     const sc = summary.data?.severity_counts || { high: 0, medium: 0, low: 0 }
-                                    const counts = { high: sc.high, medium: sc.medium, low: sc.low }
-                                    return `${name} (${(counts as any)[name] || 0})`
+                                    // 中文名称到英文键的映射
+                                    const nameMap: { [key: string]: keyof typeof sc } = {
+                                        '高危': 'high',
+                                        '中危': 'medium',
+                                        '低危': 'low'
+                                    }
+                                    const key = nameMap[name]
+                                    const count = key ? sc[key] : 0
+                                    return `${name} (${count})`
                                 }
                             },
                             series: [{
