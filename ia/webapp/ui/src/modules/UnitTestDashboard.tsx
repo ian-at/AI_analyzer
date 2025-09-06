@@ -757,53 +757,35 @@ export function UnitTestDashboard(props: { onOpenRun: (rel: string) => void }) {
                                         }
                                     ]
                                 }
-                            } else {
-                                // 有失败时显示正常的饼图
-                                return {
-                                    tooltip: {
-                                        trigger: 'item',
-                                        formatter: (params: any) => {
-                                            const { name, value, percent } = params
-                                            return `${name}<br/>失败次数: ${value} 次<br/>占比: ${percent}%`
+                            }
+
+                            return {
+                                tooltip: {
+                                    trigger: 'item',
+                                    formatter: '{a} <br/>{b}: {c} ({d}%)'
+                                },
+                                legend: {
+                                    orient: 'horizontal',
+                                    bottom: 0,
+                                    left: 'center'
+                                },
+                                series: [{
+                                    name: '失败分类',
+                                    type: 'pie',
+                                    radius: ['30%', '70%'],
+                                    center: ['50%', '45%'],
+                                    data: categories.map(cat => ({
+                                        value: cat.count,
+                                        name: cat.name
+                                    })),
+                                    emphasis: {
+                                        itemStyle: {
+                                            shadowBlur: 10,
+                                            shadowOffsetX: 0,
+                                            shadowColor: 'rgba(0, 0, 0, 0.5)'
                                         }
-                                    },
-                                    legend: {
-                                        type: 'scroll',
-                                        orient: 'vertical',
-                                        right: 10,
-                                        top: 20,
-                                        bottom: 20
-                                    },
-                                    series: [{
-                                        name: '失败分布',
-                                        type: 'pie',
-                                        radius: ['40%', '70%'],
-                                        center: ['40%', '50%'],
-                                        avoidLabelOverlap: false,
-                                        label: {
-                                            show: false,
-                                            position: 'center'
-                                        },
-                                        emphasis: {
-                                            label: {
-                                                show: true,
-                                                fontSize: 16,
-                                                fontWeight: 'bold'
-                                            }
-                                        },
-                                        labelLine: { show: false },
-                                        data: categories.map((cat, index) => ({
-                                            value: cat.count,
-                                            name: cat.name,
-                                            itemStyle: {
-                                                color: [
-                                                    '#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57',
-                                                    '#ff9ff3', '#54a0ff', '#5f27cd', '#00d2d3', '#ff9f43'
-                                                ][index % 10]
-                                            }
-                                        }))
-                                    }]
-                                }
+                                    }
+                                }]
                             }
                         })()}
                         height={320}
