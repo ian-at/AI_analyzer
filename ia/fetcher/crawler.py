@@ -11,6 +11,7 @@ from ..utils.io import (
     ensure_dir,
     list_remote_date_dirs,
     list_remote_htmls,
+    read_json,
     read_jsonl,
     write_json,
 )
@@ -60,26 +61,7 @@ def crawl_incremental(base_url: str, archive_root: str, days: int = 7) -> list[s
             ensure_dir(raw_dir)
             dest_html = os.path.join(raw_dir, item.name)
 
-            # Skip if already exists
-            if os.path.exists(dest_html):
-                continue
-
-            # Download
-            download_to(dest_html, item.url)
-            md5 = compute_md5(dest_html)
-
-            meta = {
-                "source_url": item.url,
-                "date": date_str,
-                "patch_id": item.patch_id,
-                "patch_set": item.patch_set,
-                "downloaded_at": datetime.utcnow().isoformat() + "Z",
-                "files": {"html": item.name, "html_md5": md5},
-            }
-            write_json(os.path.join(run_dir, "meta.json"), meta)
-
-            # indexes - 写入前检查是否已存在，避免重复
-            # 检查runs_index.jsonl中是否已有该记录
+            # 先处理索引管理（无论文件是否存在）
             runs_index_path = os.path.join(archive_root, "runs_index.jsonl")
             existing_runs = read_jsonl(runs_index_path) if os.path.exists(
                 runs_index_path) else []
@@ -90,8 +72,36 @@ def crawl_incremental(base_url: str, archive_root: str, days: int = 7) -> list[s
                 for r in existing_runs
             )
 
+            # 检查文件是否需要下载
+            file_exists = os.path.exists(dest_html)
+            need_download = not file_exists
+            md5 = None
+
+            if need_download:
+                # 下载文件
+                download_to(dest_html, item.url)
+                md5 = compute_md5(dest_html)
+
+                meta = {
+                    "source_url": item.url,
+                    "date": date_str,
+                    "patch_id": item.patch_id,
+                    "patch_set": item.patch_set,
+                    "downloaded_at": datetime.utcnow().isoformat() + "Z",
+                    "files": {"html": item.name, "html_md5": md5},
+                }
+                write_json(os.path.join(run_dir, "meta.json"), meta)
+            else:
+                # 文件已存在，尝试从meta.json获取md5
+                try:
+                    meta = read_json(os.path.join(run_dir, "meta.json"))
+                    md5 = meta.get("files", {}).get("html_md5", "")
+                except:
+                    # 如果无法读取meta，重新计算md5
+                    md5 = compute_md5(dest_html)
+
+            # 统一处理索引（只有不存在时才添加）
             if not already_exists:
-                # 只有不存在时才写入索引
                 append_jsonl(day_index_path, {
                     "run_dir": run_dir,
                     "patch_id": item.patch_id,
@@ -105,6 +115,7 @@ def crawl_incremental(base_url: str, archive_root: str, days: int = 7) -> list[s
                     "patch_id": item.patch_id,
                     "patch_set": item.patch_set,
                 })
+
             new_runs.append(run_dir)
 
     return new_runs
