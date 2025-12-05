@@ -20,6 +20,16 @@
     "// AI模型配置": "支持多模型配置，按顺序尝试，直到找到可用模型",
     "models": [
         {
+            "name": "deepseek",
+            "api_base": "https://api.deepseek.com/v1",
+            "api_key": "sk-d93d76f16c184728ad335fac6abc4c1c",
+            "model": "deepseek-chat",
+            "enabled": true,
+            "priority": 1,
+            "timeout": 120,
+            "max_retries": 3
+        },
+        {
             "name": "qwen3-coder",
             "api_base": "https://ai-proxy.kylinos.cn:11430/v1",
             "api_key": "EMPTY",
@@ -60,7 +70,7 @@
             "max_retries": 3
         }
     ],
-    "default_model": "qwen3-coder",
+    "default_model": "deepseek",
     "cache": {
         "enabled": true,
         "ttl_hours": 24,

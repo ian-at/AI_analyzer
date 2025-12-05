@@ -114,3 +114,55 @@ class JobStatus(BaseModel):
     status: str
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+
+
+# 故障诊断相关模型
+class FileUploadInfo(BaseModel):
+    """文件上传信息"""
+    filename: str
+    size: int
+    content_type: Optional[str] = None
+    file_path: str
+
+
+class FaultDiagnosisRequest(BaseModel):
+    """故障诊断请求"""
+    device_id: Optional[str] = None
+    description: Optional[str] = None
+    files: List[FileUploadInfo] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class FaultDiagnosisIssue(BaseModel):
+    """故障问题"""
+    issue_type: str  # 问题类型，如：硬件故障、软件错误、配置问题等
+    severity: str  # 严重程度：critical, high, medium, low
+    confidence: float  # 置信度 0-1
+    title: str  # 问题标题
+    description: str  # 问题描述
+    root_causes: List[Dict[str, Any]] = Field(default_factory=list)  # 根因分析
+    evidence: Dict[str, Any] = Field(default_factory=dict)  # 支撑证据
+    suggested_solutions: List[str] = Field(default_factory=list)  # 建议解决方案
+    related_files: List[str] = Field(default_factory=list)  # 相关文件
+
+
+class FaultDiagnosisSummary(BaseModel):
+    """故障诊断汇总"""
+    total_issues: int
+    severity_counts: Dict[str, int] = Field(
+        default_factory=lambda: {"critical": 0, "high": 0, "medium": 0, "low": 0})
+    analysis_engine: Optional[EngineInfo] = None
+    analysis_time: Optional[str] = None
+
+
+class FaultDiagnosisResponse(BaseModel):
+    """故障诊断响应"""
+    diagnosis_id: str
+    device_id: Optional[str] = None
+    status: str  # pending, analyzing, completed, failed
+    summary: FaultDiagnosisSummary
+    issues: List[FaultDiagnosisIssue] = Field(default_factory=list)
+    raw_files: List[FileUploadInfo] = Field(default_factory=list)
+    created_at: str
+    completed_at: Optional[str] = None
+    error: Optional[str] = None
