@@ -22,7 +22,7 @@
         {
             "name": "deepseek",
             "api_base": "https://api.deepseek.com/v1",
-            "api_key": "sk-d93d76f16c184728ad335fac6abc4c1c",
+            "api_key": "",
             "model": "deepseek-chat",
             "enabled": true,
             "priority": 1,
