@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from pydantic import BaseModel, Field
 
 
@@ -96,8 +96,8 @@ class RunDetailResponse(BaseModel):
     run_dir: str
     rel: str
     meta: Dict[str, Any]
-    summary: RunSummary | Dict[str, Any]
-    anomalies: List[Anomaly] | List[Dict[str, Any]]
+    summary: Union[RunSummary, Dict[str, Any]]
+    anomalies: Union[List[Anomaly], List[Dict[str, Any]]]
     ub: List[Dict[str, Any]]
 
 
@@ -129,6 +129,7 @@ class FaultDiagnosisRequest(BaseModel):
     """故障诊断请求"""
     device_id: Optional[str] = None
     description: Optional[str] = None
+    type: Optional[str] = None  # 'fault' 或 'routine'，用于区分故障分析与日常日志分析
     files: List[FileUploadInfo] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 

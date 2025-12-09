@@ -86,7 +86,7 @@ def health_check():
 @app.get("/api/v1/jobs/{job_id}")
 def get_job(job_id: str):
     """获取任务状态"""
-        with _jobs_lock:
+    with _jobs_lock:
         job = _jobs.get(job_id)
     if not job:
         return JSONResponse(status_code=404, content={"error": "任务不存在"})

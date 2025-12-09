@@ -32,7 +32,8 @@ def create_diagnosis_router(archive_root: str = None) -> APIRouter:
         try:
             diagnosis_id = handler.create_diagnosis(
                 device_id=device_id,
-                description=description
+                description=description,
+                metadata={}
             )
             return {
                 "success": True,
@@ -149,7 +150,8 @@ def create_diagnosis_router(archive_root: str = None) -> APIRouter:
             # 1. 创建诊断任务
             diagnosis_id = handler.create_diagnosis(
                 device_id=device_id,
-                description=description
+                description=description,
+                metadata={}
             )
 
             # 2. 上传文件

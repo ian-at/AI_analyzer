@@ -8,12 +8,12 @@ from typing import Optional, Dict, Any
 
 @dataclass
 class ModelConfig:
-    api_key: str | None
-    api_base: str | None
-    model: str | None
-    verify_ssl: bool | None = None
+    api_key: Optional[str]
+    api_base: Optional[str]
+    model: Optional[str]
+    verify_ssl: Optional[bool] = None
     # 新增多模型配置支持
-    models_config_file: str | None = None
+    models_config_file: Optional[str] = None
     batch_optimization_enabled: bool = True
     max_batch_size: int = 10
     cache_enabled: bool = True
@@ -40,13 +40,13 @@ class AppConfig:
     archive_root_unit: str = ""
     archive_root_interface: str = ""  # 接口测试本地存储路径
     days: int = 7
-    model: ModelConfig = None
+    model: Optional[ModelConfig] = None
 
 
 def load_env_config(
-    source_url: str | None,
-    archive_root: str | None,
-    days: int | None = None,
+    source_url: Optional[str],
+    archive_root: Optional[str],
+    days: Optional[int] = None,
 ) -> AppConfig:
     # 先尝试从配置文件加载（无需每次手动导入），若不存在再回退到环境变量
     # 支持读取多个配置文件位置

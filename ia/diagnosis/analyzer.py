@@ -56,6 +56,9 @@ DIAGNOSIS_SYSTEM_PROMPT = (
     "- 严格按JSON格式输出，符合给定schema"
 )
 
+
+
+
 DIAGNOSIS_JSON_SCHEMA = {
     "type": "object",
     "properties": {
@@ -329,7 +332,7 @@ class FaultDiagnosisAnalyzer:
             "model": model.model,
             "messages": [
                 {"role": "system", "content": DIAGNOSIS_SYSTEM_PROMPT},
-                {"role": "user", "content": f"请分析以下故障信息：\n\n{user_content}\n\n请按照JSON schema输出分析结果。"}
+                {"role": "user", "content": f"请分析以下日志信息：\n\n{user_content}\n\n请严格按JSON格式输出分析结果。"}
             ],
             "temperature": 0.2,
         }
@@ -348,6 +351,8 @@ class FaultDiagnosisAnalyzer:
 
         # 解析JSON
         result = self._parse_ai_response(content)
+        # 基础校验/规范化
+        result = self._validate_and_normalize_response(result)
 
         # 添加引擎信息
         if "summary" not in result:
@@ -383,6 +388,20 @@ class FaultDiagnosisAnalyzer:
             logger.error(f"解析AI响应失败: {e}")
             logger.debug(f"响应内容: {content[:500]}")
             return self._create_empty_result()
+
+    def _validate_and_normalize_response(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """对 AI 返回结果做基础校验并规范化为故障分析格式。
+
+        保证存在 `summary` 和 `issues` 字段。
+        如果缺失，尝试以宽松方式填充默认结构。
+        """
+        if not isinstance(result, dict):
+            return self._create_empty_result()
+        if "summary" not in result:
+            result["summary"] = {"total_issues": 0, "severity_counts": {"critical": 0, "high": 0, "medium": 0, "low": 0}}
+        if "issues" not in result:
+            result["issues"] = []
+        return result
 
     def _analyze_basic(self, analysis_data: Dict[str, Any]) -> Dict[str, Any]:
         """基础分析（不使用AI）"""

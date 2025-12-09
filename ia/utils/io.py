@@ -8,7 +8,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Iterable
+from typing import Iterable, List, Optional
 
 import requests
 from bs4 import BeautifulSoup
@@ -65,7 +65,7 @@ def append_jsonl(path: str, row: dict) -> None:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def read_jsonl(path: str) -> list[dict]:
+def read_jsonl(path: str) -> List[dict]:
     if not os.path.exists(path):
         return []
     with open(path, "r", encoding="utf-8") as f:
@@ -78,7 +78,7 @@ def fetch_url(url: str, timeout: int = 20) -> requests.Response:
     return resp
 
 
-def list_remote_date_dirs(base_url: str, max_age_days: int | None = None) -> list[str]:
+def list_remote_date_dirs(base_url: str, max_age_days: Optional[int] = None) -> List[str]:
     # 假设目录页为 Apache/nginx 的 autoindex 列表
     resp = fetch_url(base_url)
     # 使用内置 html.parser 以减少外部依赖
@@ -99,7 +99,7 @@ def list_remote_date_dirs(base_url: str, max_age_days: int | None = None) -> lis
         return sorted(links)
 
     cutoff = datetime.utcnow() - timedelta(days=max_age_days)
-    filtered: list[str] = []
+    filtered: List[str] = []
     for link in links:
         # 支持单数字和双数字的月份/日期格式
         m = re.search(r"(\d{4}-\d{1,2}-\d{1,2})/", link)
@@ -138,10 +138,10 @@ class RemoteLog:
     patch_set: str
 
 
-def list_remote_htmls(day_url: str) -> list[RemoteHtml]:
+def list_remote_htmls(day_url: str) -> List[RemoteHtml]:
     resp = fetch_url(day_url)
     soup = BeautifulSoup(resp.text, "html.parser")
-    results: list[RemoteHtml] = []
+    results: List[RemoteHtml] = []
     for a in soup.find_all("a"):
         href = a.get("href", "")
         if href.lower().endswith(".html"):
@@ -160,11 +160,11 @@ def list_remote_htmls(day_url: str) -> list[RemoteHtml]:
     return results
 
 
-def list_remote_logs(day_url: str) -> list[RemoteLog]:
+def list_remote_logs(day_url: str) -> List[RemoteLog]:
     """列出远程目录中的单元测试日志文件"""
     resp = fetch_url(day_url)
     soup = BeautifulSoup(resp.text, "html.parser")
-    results: list[RemoteLog] = []
+    results: List[RemoteLog] = []
     for a in soup.find_all("a"):
         href = a.get("href", "")
         if href.lower().endswith(".log"):
@@ -183,11 +183,11 @@ def list_remote_logs(day_url: str) -> list[RemoteLog]:
     return results
 
 
-def list_remote_interface_logs(day_url: str) -> list[RemoteLog]:
+def list_remote_interface_logs(day_url: str) -> List[RemoteLog]:
     """列出远程目录中的接口测试日志文件"""
     resp = fetch_url(day_url)
     soup = BeautifulSoup(resp.text, "html.parser")
-    results: list[RemoteLog] = []
+    results: List[RemoteLog] = []
     for a in soup.find_all("a"):
         href = a.get("href", "")
         if href.lower().endswith(".log"):

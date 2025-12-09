@@ -1,0 +1,91 @@
+{
+    "// 数据源配置": "各种测试类型的远程HTTP服务器地址",
+    "SOURCE_URL": "http://10.42.30.103/results/UnixBenchTest/",
+    "SOURCE_URL_UNIT": "http://10.42.30.103/results/UnitTest/",
+    "SOURCE_URL_INTERFACE": "http://10.42.30.103/results/InterfaceTest/",
+    "SOURCE_URL_LB": "http://10.42.30.103/results/LBTest/",
+    "// 本地存储配置": "各种测试类型的数据存档目录",
+    "ARCHIVE_ROOT": "./archive/ub",
+    "ARCHIVE_ROOT_UNIT": "./archive/unit",
+    "ARCHIVE_ROOT_INTERFACE": "./archive/interface",
+    "ARCHIVE_ROOT_LB": "./archive/lb",
+    "// 数据获取配置": "获取最近多少天的数据",
+    "DAYS": 7,
+    "// 批量优化配置": "AI分析的批量优化设置",
+    "batch_optimization": {
+        "enabled": true,
+        "max_batch_size": 10,
+        "cache_enabled": true
+    },
+    "// AI模型配置": "支持多模型配置，按顺序尝试，直到找到可用模型",
+    "models": [
+        {
+            "name": "deepseek",
+            "api_base": "https://api.deepseek.com/v1",
+            "api_key": "sk-d93d76f16c184728ad335fac6abc4c1c",
+            "model": "deepseek-chat",
+            "enabled": true,
+            "priority": 1,
+            "timeout": 120,
+            "max_retries": 3
+        },
+        {
+            "name": "qwen3-coder",
+            "api_base": "https://ai-proxy.kylinos.cn:11430/v1",
+            "api_key": "EMPTY",
+            "model": "qwen3-coder",
+            "enabled": true,
+            "priority": 2,
+            "timeout": 120,
+            "max_retries": 3
+        },
+        {
+            "name": "kimi-k2",
+            "api_base": "https://api.moonshot.cn/v1",
+            "api_key": "sk-your-api-key-here",
+            "model": "kimi-k2-0711-preview",
+            "enabled": true,
+            "priority": 1,
+            "timeout": 120,
+            "max_retries": 3
+        },
+        {
+            "name": "claude-3-5-sonnet",
+            "api_base": "https://api.anthropic.com/v1",
+            "api_key": "sk-ant-your-api-key-here",
+            "model": "claude-3-5-sonnet-20241022",
+            "enabled": false,
+            "priority": 3,
+            "timeout": 120,
+            "max_retries": 3
+        },
+        {
+            "name": "gpt-4o",
+            "api_base": "https://api.openai.com/v1",
+            "api_key": "sk-your-openai-api-key-here",
+            "model": "gpt-4o",
+            "enabled": false,
+            "priority": 4,
+            "timeout": 120,
+            "max_retries": 3
+        }
+    ],
+    "default_model": "deepseek",
+    "cache": {
+        "enabled": true,
+        "ttl_hours": 24,
+        "directory": "./cache"
+    },
+    "performance": {
+        "concurrent_requests": 3,
+        "request_delay_ms": 500,
+        "retry_delay_ms": 2000
+    },
+    "fallback": {
+        "use_heuristic_on_failure": true,
+        "max_consecutive_failures": 3
+    },
+    "ui": {
+        "show_config_menu": false
+    }
+}
